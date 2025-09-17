@@ -11,6 +11,10 @@
     "jspdf-autotable": "^3"
   },
   "devDependencies": {
+    "tailwindcss": "^3.4.9",
+    "postcss": "^8.4.41",
+    "autoprefixer": "^10.4.20",
     "vite": "^5"
   }
 }
+
