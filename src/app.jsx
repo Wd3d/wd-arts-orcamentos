@@ -289,7 +289,7 @@ export default function CalculadoraPrecificacao() {
       body: linhas.length ? linhas : [["—", "—", "—", "—"]],
       theme: "grid",
       styles: { fontSize: 10 },
-      headStyles: { fillColor: [240, 240, 240] },
+      headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] },
       margin: { left: marginX, right: marginX },
     });
 
@@ -365,7 +365,6 @@ export default function CalculadoraPrecificacao() {
             <p className="text-sm text-neutral-600">Preencha e gere o PDF do orçamento sem expor custos internos.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={addMaterial} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">+ Material</button>
             <button onClick={salvarOrcamento} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar orçamento</button>
             <button onClick={() => setMostrarLista((v) => !v)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
             <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
@@ -382,8 +381,8 @@ export default function CalculadoraPrecificacao() {
           <LabeledInput label="Nome do orçamento / Projeto" value={state.orcamentoNome} onChange={(v) => setState((s) => ({ ...s, orcamentoNome: v }))} placeholder="Ex.: Lembrancinhas aniversário" />
           <LabeledInput label="Cliente" value={state.clienteNome} onChange={(v) => setState((s) => ({ ...s, clienteNome: v }))} placeholder="Nome do cliente" />
           <LabeledInput label="Contato (opcional)" value={state.clienteContato} onChange={(v) => setState((s) => ({ ...s, clienteContato: v }))} placeholder="WhatsApp / e-mail" />
-          <LabeledInput label="Quantidade de unidades" value={state.quantidade} onChange={(v) => setState((s) => ({ ...s, quantidade: v }))} placeholder="1" />
-          <LabeledInput label="Validade do orçamento (dias)" value={state.validadeDias} onChange={(v) => setState((s) => ({ ...s, validadeDias: v }))} placeholder="7" />
+          <LabeledInput label="Quantidade de unidades" value={state.quantidade} onChange={(v) => setState((s) => ({ ...s, quantidade: v }))} placeholder="1" inputMode="numeric" />
+          <LabeledInput label="Validade do orçamento (dias)" value={state.validadeDias} onChange={(v) => setState((s) => ({ ...s, validadeDias: v }))} placeholder="7" inputMode="numeric" />
           <LabeledInput label="Prazo de entrega" value={state.prazoEntrega} onChange={(v) => setState((s) => ({ ...s, prazoEntrega: v }))} placeholder="Ex.: 5 a 7 dias úteis" />
           <LabeledInput label="Condições de pagamento" value={state.condicoesPagamento} onChange={(v) => setState((s) => ({ ...s, condicoesPagamento: v }))} placeholder="Pix / Cartão / 50% sinal" />
           <LabeledTextarea label="Observações (mostradas no PDF)" value={state.observacoes} onChange={(v) => setState((s) => ({ ...s, observacoes: v }))} placeholder="Ex.: Arte inclusa. Alterações após aprovação podem gerar custo adicional." />
@@ -472,8 +471,20 @@ export default function CalculadoraPrecificacao() {
             </table>
           </div>
 
+          {/* Botão de adicionar material abaixo da última linha */}
+          <div className="mt-3">
+            <button onClick={addMaterial} className="w-full rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">+ Material</button>
+          </div>
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <LabeledInput label="% de perda (desperdício/erro)" suffix="%" value={state.perdaPct} onChange={(v) => setState((s) => ({ ...s, perdaPct: v }))} placeholder="0,00" />
+            <LabeledInput
+              label="% de perda (desperdício/erro)"
+              suffix="%"
+              value={state.perdaPct}
+              onChange={(v) => setState((s) => ({ ...s, perdaPct: v }))}
+              placeholder="0,00"
+              inputMode="decimal"
+            />
           </div>
           <div className="mt-2 text-right text-sm text-neutral-600">
             Materiais ajustados: <span className="font-semibold">{brl(computed.materiaisAjustados)}</span>
@@ -484,9 +495,9 @@ export default function CalculadoraPrecificacao() {
         <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-lg font-semibold">Produção (por unidade) — dados internos</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <LabeledInput label="Minutos para produzir uma unidade" value={state.minutosPorUnidade} onChange={(v) => setState((s) => ({ ...s, minutosPorUnidade: v }))} placeholder="0" />
-            <LabeledInput label="Mão de obra (R$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" />
-            <LabeledInput label="Custo fixo (R$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" />
+            <LabeledInput label="Minutos para produzir uma unidade" value={state.minutosPorUnidade} onChange={(v) => setState((s) => ({ ...s, minutosPorUnidade: v }))} placeholder="0" inputMode="numeric" />
+            <LabeledInput label="Mão de obra (R\$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="Custo fixo (R\$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
         </section>
 
@@ -494,8 +505,8 @@ export default function CalculadoraPrecificacao() {
         <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
           <h2 className="mb-3 text-lg font-semibold">Precificação</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <LabeledInput label="% de lucro desejada" suffix="%" value={state.lucroPct} onChange={(v) => setState((s) => ({ ...s, lucroPct: v }))} placeholder="0,00" />
-            <LabeledInput label="% de taxa (marketplace/gateway)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" />
+            <LabeledInput label="% de lucro desejada" suffix="%" value={state.lucroPct} onChange={(v) => setState((s) => ({ ...s, lucroPct: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="% de taxa (marketplace/gateway)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -573,13 +584,13 @@ export default function CalculadoraPrecificacao() {
   );
 }
 
-function LabeledInput({ label, prefix, suffix, value, onChange, placeholder }) {
+function LabeledInput({ label, prefix, suffix, value, onChange, placeholder, inputMode }) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-neutral-800">{label}</span>
       <div className="flex items-stretch overflow-hidden rounded-xl border border-neutral-300 focus-within:ring-2 focus-within:ring-black/20">
         {prefix && <span className="flex items-center px-3 text-neutral-500">{prefix}</span>}
-        <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} inputMode="decimal" className="min-w-0 flex-1 bg-white px-3 py-2 outline-none" />
+        <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} inputMode={inputMode} className="min-w-0 flex-1 bg-white px-3 py-2 outline-none" />
         {suffix && <span className="flex items-center px-3 text-neutral-500">{suffix}</span>}
       </div>
     </label>
