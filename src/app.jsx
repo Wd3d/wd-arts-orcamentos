@@ -243,24 +243,24 @@ export default function CalculadoraPrecificacao() {
     const marginX = 48;
     let y = 56;
 
-    // Logo
-    if (state.logoDataUrl) {
-      try { doc.addImage(state.logoDataUrl, "PNG", marginX, y, 140, 140, undefined, "FAST"); } catch {}
+    // helpers mm->pt
+    const mm = (v) => v * 2.83465; // 1 mm = 2.83465 pt
+
+    // Logo (sempre 1,5cm x 1,5cm)
+    const hasLogo = !!state.logoDataUrl;
+    const logoSize = mm(15);
+    if (hasLogo) {
+      try {
+        doc.addImage(state.logoDataUrl, "PNG", marginX, y, logoSize, logoSize, undefined, "FAST");
+      } catch {}
     }
 
     // Cabeçalho
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    const offsetX = state.logoDataUrl ? 160 : 0;
-    doc.text("ORÇAMENTO", marginX + offsetX, y + 24);
+    const offsetX = hasLogo ? (logoSize + 12) : 0;
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    const hoje = new Date();
-    doc.text(`Data: ${hoje.toLocaleDateString("pt-BR")}`, marginX + offsetX, y + 44);
-    if (state.orcamentoNome) doc.text(`Ref.: ${state.orcamentoNome}`, marginX + offsetX, y + 60);
-
-    y += state.logoDataUrl ? 150 : 30;
+    y += hasLogo ? (logoSize + 10) : 30;
 
     // Dados do cliente
     doc.setFont("helvetica", "bold");
@@ -274,9 +274,14 @@ export default function CalculadoraPrecificacao() {
     doc.text(`Quantidade: ${computed.quantidade}`, marginX, y); y += 18;
 
     // Tabela de itens (apenas materiais)
+    const perdaFactor = 1 + (computed.perda || 0);
     const linhas = computed.materiais
       .filter((m) => (m.descricao || "").trim() !== "")
-      .map((m) => [m.descricao, String(m.qtdNum), brl(m.unitNum), brl(m.total)]);
+      .map((m) => {
+        const unitAdj = m.unitNum * perdaFactor;
+        const totalAdj = m.qtdNum * unitAdj;
+        return [m.descricao, String(m.qtdNum), brl(unitAdj), brl(totalAdj)];
+      });
 
     autoTable(doc, {
       startY: y,
@@ -292,7 +297,7 @@ export default function CalculadoraPrecificacao() {
 
     // Subtotal e preço (sem expor custos internos)
     doc.setFont("helvetica", "normal");
-    doc.text(`Subtotal materiais: ${brl(computed.totalMateriais)}`, marginX, y); y += 14;
+    doc.text(`Subtotal materiais: ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14; y += 14;
     if (computed.perda > 0) { doc.text(`Materiais ajustados (c/ perda): ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14; }
 
     doc.setFont("helvetica", "bold");
