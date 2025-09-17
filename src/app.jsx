@@ -3,7 +3,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
 // Calculadora de Precificação — versão PWA + Compartilhar PDF
-// Inclui: geração de PDF (cliente, sem custos internos), favoritos, salvar orçamentos (localStorage),
+// Geração de PDF para orçamento, salvar orçamentos (localStorage),
 // botão Compartilhar PDF (Web Share API) e registro de Service Worker para PWA.
 
 export default function CalculadoraPrecificacao() {
@@ -18,7 +18,7 @@ export default function CalculadoraPrecificacao() {
   };
 
   const initial = {
-    // Metadados do orçamento (aparecem no PDF)
+    // Meta dados do orçamento (aparecem no PDF)
     orcamentoNome: "",
     clienteNome: "",
     clienteContato: "",
@@ -49,6 +49,8 @@ export default function CalculadoraPrecificacao() {
   const [favoritos, setFavoritos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [mostrarLista, setMostrarLista] = useState(false);
+  const [busca, setBusca] = useState("");
+  const [ordem, setOrdem] = useState("updated_desc");
 
   // PWA install prompt
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -76,6 +78,30 @@ export default function CalculadoraPrecificacao() {
       }
     } catch {}
   }, [state]);
+
+  // Busca e ordenação da lista de orçamentos
+  const norm = (s) => (s ?? "").toString().normalize('NFD').replace(/[̀-ͯ]/g, "").toLowerCase();
+  const orcLista = useMemo(() => {
+    let arr = [...orcamentos];
+    if (busca.trim()) {
+      const b = norm(busca);
+      arr = arr.filter((o) => norm(o.orcamentoNome).includes(b) || norm(o.clienteNome).includes(b));
+    }
+    switch (ordem) {
+      case "updated_asc":
+        arr.sort((a,b)=> new Date(a._savedAt || a._id) - new Date(b._savedAt || b._id));
+        break;
+      case "nome":
+        arr.sort((a,b)=> norm(a.orcamentoNome).localeCompare(norm(b.orcamentoNome)));
+        break;
+      case "cliente":
+        arr.sort((a,b)=> norm(a.clienteNome).localeCompare(norm(b.clienteNome)));
+        break;
+      default:
+        arr.sort((a,b)=> new Date(b._savedAt || b._id) - new Date(a._savedAt || a._id));
+    }
+    return arr;
+  }, [orcamentos, busca, ordem]);
 
   // Registrar Service Worker (PWA)
   useEffect(() => {
@@ -146,7 +172,7 @@ export default function CalculadoraPrecificacao() {
     const precoSemTaxas = custoParcial * (1 + lucro); // interno
 
     const taxa = toNumber(state.taxaPct) / 100;
-    const precoFinal = (1 - taxa) === 0 ? NaN : precoSemTaxas / (1 - taxa); // mostrado ao cliente
+    const precoFinal = (1 - taxa) === 0 ? NaN : precoSemTaxas / (1 - taxa); // mostrado ao cliente no PDF do orçamento
 
     const quantidade = Math.max(1, Math.floor(toNumber(state.quantidade)) || 1);
     const totalGeral = Number.isFinite(precoFinal) ? precoFinal * quantidade : NaN;
@@ -218,14 +244,27 @@ export default function CalculadoraPrecificacao() {
 
   // Salvar/Reabrir orçamentos
   const salvarOrcamento = () => {
+    // Se já existe um _id, confirmar atualização para evitar sobrescrever sem querer
+    if (state._id && orcamentos.some((o) => o._id === state._id)) {
+      const ok = window.confirm("Atualizar este orçamento existente? Para criar um novo, use 'Salvar como novo'.");
+      if (!ok) return;
+    }
     const id = state._id || `${Date.now()}`;
     const payload = { ...state, _id: id, _savedAt: new Date().toISOString() };
     const exists = orcamentos.some((o) => o._id === id);
     const next = exists ? orcamentos.map((o) => (o._id === id ? payload : o)) : [payload, ...orcamentos];
     persistOrcamentos(next);
     setState((s) => ({ ...s, _id: id }));
-    alert("Orçamento salvo!");
+    alert(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
   };
+  const salvarComoNovo = () => {
+    const id = `${Date.now()}`;
+    const payload = { ...state, _id: id, _savedAt: new Date().toISOString() };
+    persistOrcamentos([payload, ...orcamentos]);
+    setState((s) => ({ ...s, _id: id }));
+    alert("Orçamento salvo como novo!");
+  };
+
   const carregarOrcamento = (id) => {
     const found = orcamentos.find((o) => o._id === id);
     if (found) setState(found);
@@ -297,8 +336,7 @@ export default function CalculadoraPrecificacao() {
 
     // Subtotal e preço (sem expor custos internos)
     doc.setFont("helvetica", "normal");
-    doc.text(`Subtotal materiais: ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14; y += 14;
-    if (computed.perda > 0) { doc.text(`Materiais ajustados (c/ perda): ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14; }
+    doc.text(`Subtotal materiais: ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14;
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -365,17 +403,27 @@ export default function CalculadoraPrecificacao() {
             <p className="text-sm text-neutral-600">Preencha e gere o PDF do orçamento sem expor custos internos.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={salvarOrcamento} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar orçamento</button>
-            <button onClick={() => setMostrarLista((v) => !v)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
-            <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
-            <button onClick={compartilharPDF} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Compartilhar PDF</button>
-            {isInstallable && (
-              <button onClick={instalarApp} className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-green-700 shadow-sm hover:bg-green-50">Instalar app</button>
+            {mostrarLista ? (
+              <>
+                <button onClick={() => setMostrarLista(false)} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Voltar</button>
+              </>
+            ) : (
+              <>
+                <button onClick={salvarOrcamento} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar orçamento</button>
+                <button onClick={salvarComoNovo} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar como novo</button>
+                <button onClick={() => setMostrarLista(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
+                <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
+                <button onClick={compartilharPDF} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Compartilhar PDF</button>
+                {isInstallable && (
+                  <button onClick={instalarApp} className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-green-700 shadow-sm hover:bg-green-50">Instalar app</button>
+                )}
+                <button onClick={resetar} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Resetar</button>
+              </>
             )}
-            <button onClick={resetar} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Resetar</button>
           </div>
         </header>
 
+        <div className={mostrarLista ? "hidden" : "block"}>
         {/* Meta do orçamento */}
         <section className="mb-6 grid gap-3 rounded-2xl bg-white p-4 shadow-sm md:grid-cols-2 lg:grid-cols-3">
           <LabeledInput label="Nome do orçamento / Projeto" value={state.orcamentoNome} onChange={(v) => setState((s) => ({ ...s, orcamentoNome: v }))} placeholder="Ex.: Lembrancinhas aniversário" />
@@ -496,8 +544,8 @@ export default function CalculadoraPrecificacao() {
           <h2 className="mb-3 text-lg font-semibold">Produção (por unidade) — dados internos</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <LabeledInput label="Minutos para produzir uma unidade" value={state.minutosPorUnidade} onChange={(v) => setState((s) => ({ ...s, minutosPorUnidade: v }))} placeholder="0" inputMode="numeric" />
-            <LabeledInput label="Mão de obra (R\$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" inputMode="decimal" />
-            <LabeledInput label="Custo fixo (R\$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="Mão de obra (R$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="Custo fixo (R$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
         </section>
 
@@ -506,7 +554,7 @@ export default function CalculadoraPrecificacao() {
           <h2 className="mb-3 text-lg font-semibold">Precificação</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <LabeledInput label="% de lucro desejada" suffix="%" value={state.lucroPct} onChange={(v) => setState((s) => ({ ...s, lucroPct: v }))} placeholder="0,00" inputMode="decimal" />
-            <LabeledInput label="% de taxa (marketplace/gateway)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="% de taxa (marketplace/ taxa do cartão)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -538,11 +586,32 @@ export default function CalculadoraPrecificacao() {
           )}
         </section>
 
+        </div>
+
         {/* Lista de orçamentos salvos */}
         {mostrarLista && (
           <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold">Meus orçamentos</h2>
-            {orcamentos.length === 0 ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar por nome do orçamento ou cliente..."
+                className="w-full max-w-sm rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-black/20"
+              />
+              <select
+                value={ordem}
+                onChange={(e) => setOrdem(e.target.value)}
+                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/20"
+              >
+                <option value="updated_desc">Mais recentes</option>
+                <option value="updated_asc">Mais antigos</option>
+                <option value="nome">Nome do orçamento (A–Z)</option>
+                <option value="cliente">Cliente (A–Z)</option>
+              </select>
+              <span className="text-sm text-neutral-500">{orcLista.length} resultado(s)</span>
+            </div>
+            {orcLista.length === 0 ? (
               <div className="text-sm text-neutral-500">Nenhum orçamento salvo ainda.</div>
             ) : (
               <div className="overflow-auto">
@@ -556,7 +625,7 @@ export default function CalculadoraPrecificacao() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orcamentos.map((o) => (
+                    {orcLista.map((o) => (
                       <tr key={o._id} className="border-b">
                         <td className="p-2">{o.orcamentoNome || "(sem nome)"}</td>
                         <td className="p-2">{o.clienteNome || "—"}</td>
