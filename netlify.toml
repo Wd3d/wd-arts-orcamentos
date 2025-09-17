@@ -5,13 +5,11 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# SPA fallback (caso use rotas no cliente)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
-# Não cachear o service worker
 [[headers]]
   for = "/sw.js"
   [headers.values]
