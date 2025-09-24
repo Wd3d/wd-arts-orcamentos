@@ -1,10 +1,50 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+// ===== Firebase (sync entre dispositivos) =====
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as fbSignOut,
+} from "firebase/auth";
+import {
+  getFirestore,
+  enableIndexedDbPersistence,
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 
 // Calculadora de Precificação — versão PWA + Compartilhar PDF
-// Geração de PDF para orçamento, salvar orçamentos (localStorage),
+// Inclui: geração de PDF (cliente, sem custos internos), favoritos, salvar orçamentos (localStorage),
 // botão Compartilhar PDF (Web Share API) e registro de Service Worker para PWA.
+
+// ===== Config do Firebase (substitua pelos dados do seu projeto) =====
+const firebaseConfig = {
+  apiKey: "AIzaSyAnQaV5BlIrB_7BBPkMes0f9dtqWSBU_fQ",
+  authDomain: "add-app-web-8e2e1.firebaseapp.com",
+  projectId: "add-app-web-8e2e1",
+  storageBucket: "add-app-web-8e2e1.firebasestorage.app",
+  messagingSenderId: "77808786670",
+  appId: "1:77808786670:web:b0b741a66269991372e7ff",
+  measurementId: "G-VZRD0CJNKB",
+};
+let fbApp = null, fbAuth = null, fbDb = null;
+function ensureFirebase() {
+  if (fbApp) return;
+  if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes("PASTE_ME")) return; // ainda não configurado
+  fbApp = initializeApp(firebaseConfig);
+  fbAuth = getAuth(fbApp);
+  fbDb = getFirestore(fbApp);
+  enableIndexedDbPersistence(fbDb).catch(() => {});
+}
 
 export default function CalculadoraPrecificacao() {
   // Helpers
@@ -18,7 +58,7 @@ export default function CalculadoraPrecificacao() {
   };
 
   const initial = {
-    // Meta dados do orçamento (aparecem no PDF)
+    // Metadados do orçamento (aparecem no PDF)
     orcamentoNome: "",
     clienteNome: "",
     clienteContato: "",
@@ -51,6 +91,13 @@ export default function CalculadoraPrecificacao() {
   const [mostrarLista, setMostrarLista] = useState(false);
   const [busca, setBusca] = useState("");
   const [ordem, setOrdem] = useState("updated_desc");
+  // Auth/sync
+  const [user, setUser] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("offline"); // offline | syncing | online
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("signin"); // signin | signup
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
 
   // PWA install prompt
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -78,6 +125,35 @@ export default function CalculadoraPrecificacao() {
       }
     } catch {}
   }, [state]);
+
+  // ===== Auth + listeners do Firestore =====
+  useEffect(() => {
+    try {
+      ensureFirebase();
+      if (!fbAuth) return;
+      setSyncStatus("syncing");
+      const unsubAuth = onAuthStateChanged(fbAuth, (u) => {
+        setUser(u || null);
+        if (!u) { setSyncStatus("offline"); }
+      });
+      return () => unsubAuth && unsubAuth();
+    } catch { /* firebase não configurado */ }
+  }, []);
+
+  useEffect(() => {
+    if (!user || !fbDb) return;
+    setSyncStatus("syncing");
+    const unsubA = onSnapshot(collection(fbDb, "users", user.uid, "orcamentos"), (snap) => {
+      const arr = snap.docs.map((d) => d.data());
+      setOrcamentos(arr);
+      setSyncStatus("online");
+    });
+    const unsubB = onSnapshot(collection(fbDb, "users", user.uid, "favoritos"), (snap) => {
+      const arr = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+      setFavoritos(arr);
+    });
+    return () => { unsubA(); unsubB(); };
+  }, [user]);
 
   // Busca e ordenação da lista de orçamentos
   const norm = (s) => (s ?? "").toString().normalize('NFD').replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -172,7 +248,7 @@ export default function CalculadoraPrecificacao() {
     const precoSemTaxas = custoParcial * (1 + lucro); // interno
 
     const taxa = toNumber(state.taxaPct) / 100;
-    const precoFinal = (1 - taxa) === 0 ? NaN : precoSemTaxas / (1 - taxa); // mostrado ao cliente no PDF do orçamento
+    const precoFinal = (1 - taxa) === 0 ? NaN : precoSemTaxas / (1 - taxa); // mostrado ao cliente
 
     const quantidade = Math.max(1, Math.floor(toNumber(state.quantidade)) || 1);
     const totalGeral = Number.isFinite(precoFinal) ? precoFinal * quantidade : NaN;
@@ -208,16 +284,31 @@ export default function CalculadoraPrecificacao() {
   const updateMaterial = (id, patch) => setState((s) => ({ ...s, materiais: s.materiais.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 
   // Favoritos
-  const toggleFavorito = (mat) => {
-    const isFav = favoritos.some((f) => (f.descricao || "").trim() === (mat.descricao || "").trim());
-    let next;
-    if (isFav) {
-      next = favoritos.filter((f) => (f.descricao || "").trim() !== (mat.descricao || "").trim());
-    } else {
-      next = [...favoritos, { descricao: mat.descricao || "", unitPadrao: toNumber(mat.unit) }];
+  const toggleFavorito = async (mat) => {
+    const desc = (mat.descricao || "").trim();
+    const current = favoritos.find((f) => (f.descricao || "").trim() === desc);
+
+    if (user && fbDb) {
+      try {
+        if (current?.id) {
+          await deleteDoc(doc(fbDb, "users", user.uid, "favoritos", current.id));
+        } else {
+          await addDoc(collection(fbDb, "users", user.uid, "favoritos"), {
+            descricao: desc,
+            unitPadrao: toNumber(mat.unit),
+            createdAt: serverTimestamp(),
+          });
+        }
+      } catch {}
+      updateMaterial(mat.id, { fav: !current });
+      return;
     }
+    // fallback local
+    let next;
+    if (current) next = favoritos.filter((f) => (f.descricao || "").trim() !== desc);
+    else next = [...favoritos, { descricao: desc, unitPadrao: toNumber(mat.unit) }];
     persistFavoritos(next);
-    updateMaterial(mat.id, { fav: !isFav });
+    updateMaterial(mat.id, { fav: !current });
   };
   const addFromFavorito = (fav) => {
     const nextId = (state.materiais.at(-1)?.id || 0) + 1;
@@ -243,8 +334,7 @@ export default function CalculadoraPrecificacao() {
   };
 
   // Salvar/Reabrir orçamentos
-  const salvarOrcamento = () => {
-    // Se já existe um _id, confirmar atualização para evitar sobrescrever sem querer
+  const salvarOrcamento = async () => {
     if (state._id && orcamentos.some((o) => o._id === state._id)) {
       const ok = window.confirm("Atualizar este orçamento existente? Para criar um novo, use 'Salvar como novo'.");
       if (!ok) return;
@@ -252,14 +342,37 @@ export default function CalculadoraPrecificacao() {
     const id = state._id || `${Date.now()}`;
     const payload = { ...state, _id: id, _savedAt: new Date().toISOString() };
     const exists = orcamentos.some((o) => o._id === id);
+
+    if (user && fbDb) {
+      try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {}
+      setState((s) => ({ ...s, _id: id }));
+      alert(exists ? "Orçamento atualizado (nuvem)!" : "Orçamento salvo (nuvem)!");
+      return;
+    }
     const next = exists ? orcamentos.map((o) => (o._id === id ? payload : o)) : [payload, ...orcamentos];
     persistOrcamentos(next);
     setState((s) => ({ ...s, _id: id }));
     alert(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
   };
-  const salvarComoNovo = () => {
+    const exists = orcamentos.some((o) => o._id === id);
+    const next = exists ? orcamentos.map((o) => (o._id === id ? payload : o)) : [payload, ...orcamentos];
+    persistOrcamentos(next);
+    setState((s) => ({ ...s, _id: id }));
+    alert(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
+  };
+  const salvarComoNovo = async () => {
     const id = `${Date.now()}`;
     const payload = { ...state, _id: id, _savedAt: new Date().toISOString() };
+    if (user && fbDb) {
+      try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {}
+      setState((s) => ({ ...s, _id: id }));
+      alert("Orçamento salvo como novo (nuvem)!");
+      return;
+    }
+    persistOrcamentos([payload, ...orcamentos]);
+    setState((s) => ({ ...s, _id: id }));
+    alert("Orçamento salvo como novo!");
+  };
     persistOrcamentos([payload, ...orcamentos]);
     setState((s) => ({ ...s, _id: id }));
     alert("Orçamento salvo como novo!");
@@ -270,7 +383,13 @@ export default function CalculadoraPrecificacao() {
     if (found) setState(found);
     setMostrarLista(false);
   };
-  const excluirOrcamento = (id) => {
+  const excluirOrcamento = async (id) => {
+    if (!window.confirm("Excluir este orçamento?")) return;
+    if (user && fbDb) {
+      try { await deleteDoc(doc(fbDb, "users", user.uid, "orcamentos", id)); } catch {}
+      if (state._id === id) setState(initial);
+      return;
+    }
     const next = orcamentos.filter((o) => o._id !== id);
     persistOrcamentos(next);
     if (state._id === id) setState(initial);
@@ -402,7 +521,16 @@ export default function CalculadoraPrecificacao() {
             <h1 className="text-2xl font-bold tracking-tight">Calculadora de Precificação</h1>
             <p className="text-sm text-neutral-600">Preencha e gere o PDF do orçamento sem expor custos internos.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {user ? (
+              <>
+                <span className="text-sm text-neutral-600">Conectado: <span className="font-medium">{user.email}</span> — <span className="italic">{syncStatus}</span></span>
+                <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth); }catch{} }} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Sair</button>
+              </>
+            ) : (
+              <button onClick={()=> setAuthOpen(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Entrar</button>
+            )}
+            
             {mostrarLista ? (
               <>
                 <button onClick={() => setMostrarLista(false)} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Voltar</button>
@@ -544,8 +672,8 @@ export default function CalculadoraPrecificacao() {
           <h2 className="mb-3 text-lg font-semibold">Produção (por unidade) — dados internos</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <LabeledInput label="Minutos para produzir uma unidade" value={state.minutosPorUnidade} onChange={(v) => setState((s) => ({ ...s, minutosPorUnidade: v }))} placeholder="0" inputMode="numeric" />
-            <LabeledInput label="Mão de obra (R$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" inputMode="decimal" />
-            <LabeledInput label="Custo fixo (R$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="Mão de obra (R\$/min)" prefix="R$" value={state.maoDeObraPorMin} onChange={(v) => setState((s) => ({ ...s, maoDeObraPorMin: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="Custo fixo (R\$/min)" prefix="R$" value={state.custoFixoPorMin} onChange={(v) => setState((s) => ({ ...s, custoFixoPorMin: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
         </section>
 
@@ -554,7 +682,7 @@ export default function CalculadoraPrecificacao() {
           <h2 className="mb-3 text-lg font-semibold">Precificação</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <LabeledInput label="% de lucro desejada" suffix="%" value={state.lucroPct} onChange={(v) => setState((s) => ({ ...s, lucroPct: v }))} placeholder="0,00" inputMode="decimal" />
-            <LabeledInput label="% de taxa (marketplace/ taxa do cartão)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" inputMode="decimal" />
+            <LabeledInput label="% de taxa (marketplace/gateway)" suffix="%" value={state.taxaPct} onChange={(v) => setState((s) => ({ ...s, taxaPct: v }))} placeholder="0,00" inputMode="decimal" />
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -648,6 +776,31 @@ export default function CalculadoraPrecificacao() {
         <footer className="text-center text-xs text-neutral-500">
           Dica: os dados, favoritos e orçamentos ficam apenas no seu dispositivo (localStorage). Para manter um backup, gere o PDF e arquive com seus clientes.
         </footer>
+
+      {/* ===== Modal de Autenticação ===== */}
+      {authOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">{authMode === "signin" ? "Entrar" : "Criar conta"}</h3>
+              <button onClick={()=> setAuthOpen(false)} className="rounded-xl border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-100">Fechar</button>
+            </div>
+            <label className="mb-2 block text-sm font-medium">E-mail</label>
+            <input value={authEmail} onChange={(e)=> setAuthEmail(e.target.value)} type="email" placeholder="voce@exemplo.com" className="mb-3 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-black/20" />
+            <label className="mb-2 block text-sm font-medium">Senha</label>
+            <input value={authPass} onChange={(e)=> setAuthPass(e.target.value)} type="password" placeholder="••••••••" className="mb-4 w-full rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-black/20" />
+            <div className="flex gap-2">
+              {authMode === "signin" ? (
+                <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(fbAuth, authEmail, authPass); setAuthOpen(false);}catch(e){ alert("Falha ao entrar: "+ (e?.message||"")); } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
+              ) : (
+                <button onClick={async()=>{ try{ ensureFirebase(); await createUserWithEmailAndPassword(fbAuth, authEmail, authPass); setAuthOpen(false);}catch(e){ alert("Falha ao criar conta: "+ (e?.message||"")); } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
+              )}
+              <button onClick={()=> setAuthMode(authMode === "signin" ? "signup" : "signin")} className="rounded-2xl border border-neutral-300 px-4 py-2">{authMode === "signin" ? "Criar conta" : "Já tenho conta"}</button>
+            </div>
+            <p className="mt-3 text-xs text-neutral-500">Se preferir, crie uma conta simples por e‑mail/senha. Seus orçamentos ficarão disponíveis em todos os dispositivos.</p>
+          </div>
+        </div>
+      )
       </div>
     </div>
   );
@@ -676,7 +829,7 @@ function LabeledTextarea({ label, value, onChange, placeholder }) {
 }
 
 /*
-==================== PWA: ARQUIVOS QUE VOCÊ PRECISA CRIAR NO PROJETO ====================
+==================== PWA + FIREBASE: O QUE CONFIGURAR ====================
 
 1) public/manifest.webmanifest
 --------------------------------
@@ -735,6 +888,21 @@ Crie as imagens em /public/icons conforme as dimensões acima (192x192, 512x512 
 4) HTTPS + domínio
 --------------------------------
 PWA exige site em HTTPS. Se publicar na Vercel/Netlify, já vem com HTTPS.
+
+5) Firebase (para sync entre dispositivos)
+--------------------------------
+- Em `package.json`, adicione: "firebase": "^10"
+- No topo deste arquivo, preencha o objeto `firebaseConfig` com as chaves do seu projeto (Console Firebase → Project settings → Web App → Config)
+- Ative Authentication (Email/Password) e Cloud Firestore.
+- Regras do Firestore (seguras por usuário):
+  rules_version = '2';
+  service cloud.firestore {
+    match /databases/{database}/documents {
+      match /users/{uid}/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
 
 ========================================================================================
 */
