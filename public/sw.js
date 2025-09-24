@@ -1,5 +1,6 @@
 const CACHE = 'wd-arts-cache-v1';
 const OFFLINE_URL = '/';
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
@@ -7,9 +8,11 @@ self.addEventListener('install', (event) => {
     self.skipWaiting();
   })());
 });
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith((async () => {
