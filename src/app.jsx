@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-
 // ===== Firebase (sync entre dispositivos) =====
 import { initializeApp } from "firebase/app";
 import {
@@ -10,6 +9,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as fbSignOut,
+  deleteUser,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -21,9 +21,11 @@ import {
   onSnapshot,
   addDoc,
   serverTimestamp,
+  getDocs,
+  writeBatch,
 } from "firebase/firestore";
 
-// ===== Config do Firebase (substitua pelas chaves do seu projeto) =====
+// ===== Config do Firebase =====
 const firebaseConfig = {
   apiKey: "AIzaSyAnQaV5BlIrB_7BBPkMes0f9dtqWSBU_fQ",
   authDomain: "add-app-web-8e2e1.firebaseapp.com",
@@ -95,11 +97,23 @@ export default function CalculadoraPrecificacao() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
 
-  // PWA install prompt
+  // PWA
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstallable, setIsInstallable] = useState(false);
 
-  // LocalStorage
+  // Toast
+  const [toast, setToast] = useState(null);
+  const pushToast = (msg, type = "success") => {
+    try { clearTimeout(window.__toastTmr); } catch {}
+    setToast({ msg, type });
+    window.__toastTmr = setTimeout(() => setToast(null), 2400);
+  };
+
+  // LGPD
+  const [lgpdOpen, setLgpdOpen] = useState(false);
+  const [lgpdAgree, setLgpdAgree] = useState(false);
+
+  // LocalStorage (carregar/salvar)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY); if (raw) setState(JSON.parse(raw));
@@ -110,6 +124,13 @@ export default function CalculadoraPrecificacao() {
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
   }, [state]);
+
+  // LGPD: abrir na primeira visita
+  useEffect(() => {
+    try { if (!localStorage.getItem("lgpdAcceptedAt")) setLgpdOpen(true); } catch {}
+  }, []);
+  const aceitarLGPD = () => { try { localStorage.setItem("lgpdAcceptedAt", new Date().toISOString()); } catch {} setLgpdOpen(false); pushToast("Consentimento registrado."); };
+  const recusarLGPD = () => { alert("Para usar o app é necessário aceitar a Política de Privacidade."); };
 
   // Auth listeners
   useEffect(() => {
@@ -137,7 +158,7 @@ export default function CalculadoraPrecificacao() {
     return () => { unsubA(); unsubB(); };
   }, [user]);
 
-  // SW
+  // SW e instalação PWA
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -155,7 +176,7 @@ export default function CalculadoraPrecificacao() {
   }, []);
   const instalarApp = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; setDeferredPrompt(null); setIsInstallable(false); };
 
-  // Persist helpers
+  // Persistência simples
   const persistFavoritos = (next) => { setFavoritos(next); try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {} };
   const persistOrcamentos = (next) => { setOrcamentos(next); try { localStorage.setItem(ORCS_KEY, JSON.stringify(next)); } catch {} };
 
@@ -213,6 +234,7 @@ export default function CalculadoraPrecificacao() {
         else await addDoc(collection(fbDb, "users", user.uid, "favoritos"), { descricao: desc, unitPadrao: toNumber(mat.unit), createdAt: serverTimestamp() });
       } catch {}
       updateMaterial(mat.id, { fav: !current });
+      pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
       return;
     }
     let next;
@@ -220,12 +242,26 @@ export default function CalculadoraPrecificacao() {
     else next = [...favoritos, { descricao: desc, unitPadrao: toNumber(mat.unit) }];
     persistFavoritos(next);
     updateMaterial(mat.id, { fav: !current });
+    pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
   };
   const addFromFavorito = (fav) => {
     const nextId = (state.materiais.at(-1)?.id || 0) + 1;
     setState((s) => ({ ...s, materiais: [...s.materiais, { id: nextId, descricao: fav.descricao, qtd: "", unit: String(fav.unitPadrao ?? ""), fav: true }] }));
   };
-  const limparFavoritos = () => persistFavoritos([]);
+  const limparFavoritos = async () => {
+    const ok = window.confirm("Deseja realmente limpar TODOS os favoritos?");
+    if (!ok) return;
+    if (user && fbDb) {
+      try {
+        const snap = await getDocs(collection(fbDb, "users", user.uid, "favoritos"));
+        const batch = writeBatch(fbDb);
+        snap.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      } catch {}
+    }
+    persistFavoritos([]);
+    pushToast("Favoritos excluídos.");
+  };
 
   // Logo
   const onLogoUpload = (file) => {
@@ -248,13 +284,13 @@ export default function CalculadoraPrecificacao() {
     if (user && fbDb) {
       try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {}
       setState((s) => ({ ...s, _id: id }));
-      alert(exists ? "Orçamento atualizado (nuvem)!" : "Orçamento salvo (nuvem)!");
+      pushToast(exists ? "Orçamento atualizado (nuvem)!" : "Orçamento salvo (nuvem)!");
       return;
     }
     const next = exists ? orcamentos.map((o) => (o._id === id ? payload : o)) : [payload, ...orcamentos];
     persistOrcamentos(next);
     setState((s) => ({ ...s, _id: id }));
-    alert(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
+    pushToast(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
   };
 
   const salvarComoNovo = async () => {
@@ -263,12 +299,12 @@ export default function CalculadoraPrecificacao() {
     if (user && fbDb) {
       try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {}
       setState((s) => ({ ...s, _id: id }));
-      alert("Orçamento salvo como novo (nuvem)!");
+      pushToast("Orçamento salvo como novo (nuvem)!");
       return;
     }
     persistOrcamentos([payload, ...orcamentos]);
     setState((s) => ({ ...s, _id: id }));
-    alert("Orçamento salvo como novo!");
+    pushToast("Orçamento salvo como novo!");
   };
 
   const carregarOrcamento = (id) => {
@@ -282,14 +318,54 @@ export default function CalculadoraPrecificacao() {
     if (user && fbDb) {
       try { await deleteDoc(doc(fbDb, "users", user.uid, "orcamentos", id)); } catch {}
       if (state._id === id) setState(initial);
+      pushToast("Orçamento excluído.");
       return;
     }
     const next = orcamentos.filter((o) => o._id !== id);
     persistOrcamentos(next);
     if (state._id === id) setState(initial);
+    pushToast("Orçamento excluído.");
   };
 
-  // PDF (perda embutida no unitário + cabeçalho preto da tabela)
+  // Excluir conta (LGPD) — dupla confirmação
+  const excluirContaDefinitivamente = async () => {
+    if (!user) return;
+    const ok1 = window.confirm("Tem certeza que deseja excluir sua conta e TODOS os seus dados?");
+    if (!ok1) return;
+    const texto = window.prompt("Confirmação final: digite EXCLUIR para prosseguir.");
+    if (texto !== "EXCLUIR") { pushToast("Ação cancelada.", "info"); return; }
+    try {
+      if (fbDb) {
+        const colls = ["orcamentos","favoritos"];
+        for (const c of colls) {
+          const snap = await getDocs(collection(fbDb, "users", user.uid, c));
+          if (!snap.empty) {
+            const batch = writeBatch(fbDb);
+            snap.forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+          }
+        }
+      }
+      await deleteUser(user); // pode exigir login recente
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(FAV_KEY);
+        localStorage.removeItem(ORCS_KEY);
+        localStorage.removeItem("lgpdAcceptedAt");
+      } catch {}
+      setUser(null); setState(initial); setOrcamentos([]); setFavoritos([]);
+      pushToast("Conta excluída com sucesso.");
+    } catch (e) {
+      if (e?.code === "auth/requires-recent-login") {
+        alert("Por segurança, faça login novamente para excluir a conta. Entre de novo e repita a exclusão.");
+        setAuthOpen(true);
+      } else {
+        alert("Falha ao excluir conta: " + (e?.message || ""));
+      }
+    }
+  };
+
+  // PDF (perda embutida + cabeçalho preto)
   const buildPDF = () => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const marginX = 48; let y = 56;
@@ -299,18 +375,14 @@ export default function CalculadoraPrecificacao() {
     const logoSize = mm(15);
     if (hasLogo) { try { doc.addImage(state.logoDataUrl, "PNG", marginX, y, logoSize, logoSize, undefined, "FAST"); } catch {} }
     doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-    const offsetX = hasLogo ? (logoSize + 12) : 0;
-    // título opcional: doc.text(state.orcamentoNome || "Orçamento", marginX + offsetX, y + 14);
     y += hasLogo ? (logoSize + 10) : 30;
 
-    // cliente
     doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Dados do cliente", marginX, y); y += 14;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.text(`Nome: ${state.clienteNome || "—"}`, marginX, y); y += 14;
     if (state.clienteContato) { doc.text(`Contato: ${state.clienteContato}`, marginX, y); y += 14; }
     doc.text(`Quantidade: ${computed.quantidade}`, marginX, y); y += 18;
 
-    // materiais (perda embutida)
     const perdaFactor = 1 + (computed.perda || 0);
     const linhas = computed.materiais
       .filter((m) => (m.descricao || "").trim() !== "")
@@ -332,7 +404,6 @@ export default function CalculadoraPrecificacao() {
 
     y = doc.lastAutoTable.finalY + 10;
 
-    // totais (sem custos internos)
     doc.setFont("helvetica", "normal");
     doc.text(`Subtotal materiais: ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14;
 
@@ -351,7 +422,6 @@ export default function CalculadoraPrecificacao() {
   };
 
   const gerarPDF = () => { const { doc, nomeArquivo } = buildPDF(); doc.save(`orcamento-${nomeArquivo}.pdf`); };
-
   const compartilharPDF = async () => {
     try {
       const { doc, nomeArquivo } = buildPDF();
@@ -369,16 +439,19 @@ export default function CalculadoraPrecificacao() {
 
   const resetar = () => setState(initial);
 
-  // Busca + ordenação lista
-  const norm = (s) => (s ?? "").toString().normalize('NFD').replace(/[̀-ͯ]/g, "").toLowerCase();
+  // Busca/ordenação da lista de orçamentos
+  const norm = (s) => (s ?? "").toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const orcLista = useMemo(() => {
     let arr = [...orcamentos];
-    if (busca.trim()) { const b = norm(busca); arr = arr.filter((o) => norm(o.orcamentoNome).includes(b) || norm(o.clienteNome).includes(b)); }
+    if (busca.trim()) {
+      const b = norm(busca);
+      arr = arr.filter((o) => norm(o.orcamentoNome).includes(b) || norm(o.clienteNome).includes(b));
+    }
     switch (ordem) {
-      case "updated_asc": arr.sort((a,b)=> new Date(a._savedAt||a._id) - new Date(b._savedAt||b._id)); break;
+      case "updated_asc": arr.sort((a,b)=> new Date(a._savedAt || a._id) - new Date(b._savedAt || b._id)); break;
       case "nome": arr.sort((a,b)=> norm(a.orcamentoNome).localeCompare(norm(b.orcamentoNome))); break;
       case "cliente": arr.sort((a,b)=> norm(a.clienteNome).localeCompare(norm(b.clienteNome))); break;
-      default: arr.sort((a,b)=> new Date(b._savedAt||b._id) - new Date(a._savedAt||a._id));
+      default: arr.sort((a,b)=> new Date(b._savedAt || b._id) - new Date(a._savedAt || a._id));
     }
     return arr;
   }, [orcamentos, busca, ordem]);
@@ -396,6 +469,7 @@ export default function CalculadoraPrecificacao() {
             {user ? (
               <>
                 <span className="text-sm text-neutral-600">Conectado: <span className="font-medium">{user.email}</span> — <span className="italic">{syncStatus}</span></span>
+                <button onClick={excluirContaDefinitivamente} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Excluir conta</button>
                 <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth); }catch{} }} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Sair</button>
               </>
             ) : (
@@ -510,7 +584,6 @@ export default function CalculadoraPrecificacao() {
               </table>
             </div>
 
-            {/* Botão +Material abaixo da última linha */}
             <div className="mt-3">
               <button onClick={addMaterial} className="w-full rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">+ Material</button>
             </div>
@@ -609,7 +682,41 @@ export default function CalculadoraPrecificacao() {
 
         <footer className="text-center text-xs text-neutral-500">Dica: instale o app para usar offline. Faça login para sincronizar pela nuvem.</footer>
 
-        {/* Modal Auth */}
+        {toast && (
+          <div aria-live="polite" className="fixed bottom-4 right-4 z-50">
+            <div className={`rounded-xl px-4 py-3 shadow-lg ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-white'}`}>
+              {toast.msg}
+            </div>
+          </div>
+        )}
+
+        {/* LGPD Modal */}
+        {lgpdOpen && (
+          <div className="fixed inset-0 z-[60] grid place-items-center bg-black/50 p-4">
+            <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
+              <h3 className="mb-2 text-lg font-semibold">Política de Privacidade (LGPD)</h3>
+              <div className="prose max-w-none text-sm text-neutral-700">
+                <p>Para usar este app, precisamos do seu consentimento para tratar dados pessoais conforme a LGPD.</p>
+                <ul className="list-disc pl-5">
+                  <li>Dados armazenados: orçamentos, materiais favoritos e e-mail (quando logado).</li>
+                  <li>Finalidade: gerar e organizar orçamentos e sincronizar entre dispositivos.</li>
+                  <li>Base legal: consentimento e execução do contrato.</li>
+                  <li>Você pode revogar o consentimento e excluir sua conta a qualquer momento.</li>
+                </ul>
+              </div>
+              <label className="mt-4 mb-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={lgpdAgree} onChange={(e)=> setLgpdAgree(e.target.checked)} />
+                <span>Li e concordo com a Política de Privacidade e o tratamento de dados.</span>
+              </label>
+              <div className="flex justify-end gap-2">
+                <button onClick={recusarLGPD} className="rounded-xl border border-neutral-300 px-4 py-2">Recusar</button>
+                <button disabled={!lgpdAgree} onClick={aceitarLGPD} className={`rounded-2xl px-4 py-2 text-white shadow-sm ${lgpdAgree ? 'bg-black hover:bg-neutral-800' : 'bg-neutral-400 cursor-not-allowed'}`}>Aceitar e continuar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Auth Modal */}
         {authOpen && (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
