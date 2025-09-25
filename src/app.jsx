@@ -97,9 +97,9 @@ export default function CalculadoraPrecificacao() {
   const [mostrarGestor, setMostrarGestor] = useState(false);
   const [catalogo, setCatalogo] = useState([]);
   const [catBusca, setCatBusca] = useState("");
-  const [catForm, setCatForm] = useState({ nome: "", unidade: "", preco: "", obs: "" });
+  const [catForm, setCatForm] = useState({ nome: "", unidade: "", quantidade: "", preco: "", obs: "" });
   const [editCatId, setEditCatId] = useState(null);
-  const [editCatData, setEditCatData] = useState({ nome: "", unidade: "", preco: "", obs: "" });
+  const [editCatData, setEditCatData] = useState({ nome: "", unidade: "", quantidade: "", preco: "", obs: "" });
 
   // Auth/sync
   const [user, setUser] = useState(null);
@@ -108,6 +108,10 @@ export default function CalculadoraPrecificacao() {
   const [authMode, setAuthMode] = useState("signin"); // signin | signup
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+
+  // LGPD / Política de Privacidade
+  const [lgpdAccepted, setLgpdAccepted] = useState(false);
+  const [lgpdShowModal, setLgpdShowModal] = useState(false);
 
   // PWA
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -158,6 +162,7 @@ export default function CalculadoraPrecificacao() {
       const favRaw = localStorage.getItem(FAV_KEY); if (favRaw) setFavoritos(JSON.parse(favRaw));
       const orcRaw = localStorage.getItem(ORCS_KEY); if (orcRaw) setOrcamentos(JSON.parse(orcRaw));
       const catRaw = localStorage.getItem(CATA_KEY); if (catRaw) setCatalogo(JSON.parse(catRaw));
+      const lgpd = localStorage.getItem("lgpdAccepted-v1"); setLgpdAccepted(!!lgpd);
     } catch {}
   }, []);
   useEffect(() => {
@@ -167,6 +172,9 @@ export default function CalculadoraPrecificacao() {
   const persistFavoritos = (next) => { setFavoritos(next); try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {} };
   const persistOrcamentos = (next) => { setOrcamentos(next); try { localStorage.setItem(ORCS_KEY, JSON.stringify(next)); } catch {} };
   const persistCatalogo = (next) => { setCatalogo(next); try { localStorage.setItem(CATA_KEY, JSON.stringify(next)); } catch {} };
+
+  // LGPD helpers
+  const acceptLGPD = () => { setLgpdAccepted(true); try { localStorage.setItem("lgpdAccepted-v1", "1"); } catch {} setLgpdShowModal(false); };
 
   // ===== Auth e sync Firestore =====
   useEffect(() => {
@@ -345,16 +353,32 @@ export default function CalculadoraPrecificacao() {
   // ===== Gestor de Materiais (catálogo) =====
   const addFromCatalog = (item) => {
     const nextId = (state.materiais.at(-1)?.id || 0) + 1;
-    setState((s) => ({ ...s, materiais: [...s.materiais, { id: nextId, descricao: item.nome, qtd: "", unit: String(item.preco ?? ""), fav: false }] }));
+    setState((s) => ({
+      ...s,
+      materiais: [
+        ...s.materiais,
+        { id: nextId, descricao: item.nome, qtd: String(item.quantidade ?? ""), unit: String(item.preco ?? ""), fav: false },
+      ],
+    }));
     pushToast("Material adicionado ao orçamento.");
   };
   const salvarMaterialCatalogo = async () => {
     const nome = (catForm.nome || "").trim();
     if (!nome) { alert("Informe o nome do material"); return; }
-    const novo = { id: `${Date.now()}`, nome, unidade: (catForm.unidade || "").trim(), preco: toNumber(catForm.preco), obs: (catForm.obs || "").trim(), createdAt: new Date().toISOString() };
+    const novo = {
+      id: `${Date.now()}`,
+      nome,
+      unidade: (catForm.unidade || "").trim(),
+      quantidade: toNumber(catForm.quantidade),
+      preco: toNumber(catForm.preco),
+      obs: (catForm.obs || "").trim(),
+      createdAt: new Date().toISOString(),
+    };
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "catalogo", novo.id), novo); } catch {} }
     persistCatalogo([novo, ...catalogo]);
-    setCatForm({ nome: "", unidade: "", preco: "", obs: "" });
+    setCatForm({ nome: "", unidade: "", quantidade: "", preco: "", obs: "" });
+    pushToast("Material cadastrado.");
+  };
     pushToast("Material cadastrado.");
   };
   const removerMaterialCatalogo = async (id) => {
@@ -363,11 +387,17 @@ export default function CalculadoraPrecificacao() {
     persistCatalogo(catalogo.filter((c) => c.id !== id));
     pushToast("Material excluído.");
   };
-  const iniciarEdicaoMaterial = (item) => { setEditCatId(item.id); setEditCatData({ nome: item.nome || "", unidade: item.unidade || "", preco: String(item.preco ?? ""), obs: item.obs || "" }); };
-  const cancelarEdicaoMaterial = () => { setEditCatId(null); setEditCatData({ nome: "", unidade: "", preco: "", obs: "" }); };
+  const iniciarEdicaoMaterial = (item) => { setEditCatId(item.id); setEditCatData({ nome: item.nome || "", unidade: item.unidade || "", quantidade: String(item.quantidade ?? ""), preco: String(item.preco ?? ""), obs: item.obs || "" }); };
+  const cancelarEdicaoMaterial = () => { setEditCatId(null); setEditCatData({ nome: "", unidade: "", quantidade: "", preco: "", obs: "" }); };
   const salvarEdicaoMaterial = async () => {
     if (!editCatId) return;
-    const patch = { ...editCatData, preco: toNumber(editCatData.preco) };
+    const patch = { ...editCatData, preco: toNumber(editCatData.preco), quantidade: toNumber(editCatData.quantidade) };
+    if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "catalogo", editCatId), { ...(catalogo.find(c=>c.id===editCatId) || {}), ...patch, id: editCatId }); } catch {} }
+    const next = catalogo.map((c) => (c.id === editCatId ? { ...c, ...patch } : c));
+    persistCatalogo(next);
+    cancelarEdicaoMaterial();
+    pushToast("Material atualizado.");
+  };
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "catalogo", editCatId), { ...(catalogo.find(c=>c.id===editCatId) || {}), ...patch, id: editCatId }); } catch {} }
     const next = catalogo.map((c) => (c.id === editCatId ? { ...c, ...patch } : c));
     persistCatalogo(next);
@@ -667,68 +697,9 @@ export default function CalculadoraPrecificacao() {
                 <table className="w-full table-auto border-collapse text-sm">
                   <thead>
                     <tr className="bg-neutral-100 text-left">
-                      <th className="p-2">Logo</th>
-                      <th className="p-2">Nome</th>
-                      <th className="p-2">Cliente</th>
-                      <th className="p-2">Atualizado</th>
-                      <th className="p-2 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orcLista.map((o) => (
-                      <tr key={o._id} className="border-b">
-                        <td className="p-2">
-                          {o.logoDataUrl ? (
-                            <img src={o.logoDataUrl} alt="logo" className="h-8 w-8 rounded-full object-cover border" />
-                          ) : (
-                            <div className="h-8 w-8 rounded-full border bg-neutral-100" />
-                          )}
-                        </td>
-                        <td className="p-2">{o.orcamentoNome || "(sem nome)"}</td>
-                        <td className="p-2">{o.clienteNome || "—"}</td>
-                        <td className="p-2">{new Date(o._savedAt || o._id).toLocaleString("pt-BR")}</td>
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => carregarOrcamento(o._id)} className="rounded-xl border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100">Abrir</button>
-                            <button onClick={() => excluirOrcamento(o._id)} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-red-600 hover:bg-red-50">Excluir</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Gestor de materiais */}
-        {mostrarGestor && (
-          <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-lg font-semibold">Gestor de materiais</h2>
-            {!user && <p className="mb-2 text-xs text-neutral-500">Dica: faça login para sincronizar seu catálogo entre dispositivos.</p>}
-
-            <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <LabeledInput label="Nome" value={catForm.nome} onChange={(v)=> setCatForm(f=>({...f, nome:v}))} placeholder="Ex.: Papel A4 90g" />
-              <LabeledInput label="Unidade" value={catForm.unidade} onChange={(v)=> setCatForm(f=>({...f, unidade:v}))} placeholder="Ex.: folha, metro, ml" />
-              <LabeledInput label="Preço unitário (R$)" prefix="R$" value={catForm.preco} onChange={(v)=> setCatForm(f=>({...f, preco:v}))} placeholder="0,00" inputMode="decimal" />
-              <LabeledInput label="Obs. (opcional)" value={catForm.obs} onChange={(v)=> setCatForm(f=>({...f, obs:v}))} placeholder="Marca, cor..." />
-              <div className="sm:col-span-2 lg:col-span-4">
-                <button onClick={salvarMaterialCatalogo} className="w-full rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Cadastrar material</button>
-              </div>
-            </div>
-
-            <div className="mb-3 flex items-center gap-2">
-              <input value={catBusca} onChange={(e)=> setCatBusca(e.target.value)} placeholder="Buscar material..." className="w-full max-w-sm rounded-xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-black/20" />
-              <span className="text-sm text-neutral-500">{catLista.length} item(ns)</span>
-            </div>
-
-            <div className="overflow-auto">
-              <table className="w-full table-auto border-collapse text-sm">
-                <thead>
-                  <tr className="bg-neutral-100 text-left">
                     <th className="p-2">Nome</th>
                     <th className="p-2">Unidade</th>
+                    <th className="p-2">Qtd padrão</th>
                     <th className="p-2">Preço</th>
                     <th className="p-2">Obs.</th>
                     <th className="p-2 text-right">Ações</th>
@@ -741,6 +712,7 @@ export default function CalculadoraPrecificacao() {
                         <>
                           <td className="p-2"><input value={editCatData.nome} onChange={(e)=> setEditCatData(d=>({...d, nome:e.target.value}))} className="w-full rounded-xl border border-neutral-300 px-2 py-1" /></td>
                           <td className="p-2"><input value={editCatData.unidade} onChange={(e)=> setEditCatData(d=>({...d, unidade:e.target.value}))} className="w-full rounded-xl border border-neutral-300 px-2 py-1" /></td>
+                          <td className="p-2"><input value={editCatData.quantidade} onChange={(e)=> setEditCatData(d=>({...d, quantidade:e.target.value}))} className="w-full rounded-xl border border-neutral-300 px-2 py-1 text-right" inputMode="numeric" /></td>
                           <td className="p-2"><input value={editCatData.preco} onChange={(e)=> setEditCatData(d=>({...d, preco:e.target.value}))} className="w-full rounded-xl border border-neutral-300 px-2 py-1 text-right" inputMode="decimal" /></td>
                           <td className="p-2"><input value={editCatData.obs} onChange={(e)=> setEditCatData(d=>({...d, obs:e.target.value}))} className="w-full rounded-xl border border-neutral-300 px-2 py-1" /></td>
                           <td className="p-2 text-right">
@@ -754,7 +726,18 @@ export default function CalculadoraPrecificacao() {
                         <>
                           <td className="p-2">{c.nome}</td>
                           <td className="p-2">{c.unidade || "—"}</td>
+                          <td className="p-2">{String(c.quantidade ?? "—")}</td>
                           <td className="p-2">{brl(toNumber(c.preco))}</td>
+                          <td className="p-2">{c.obs || "—"}</td>
+                          <td className="p-2 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button onClick={()=> addFromCatalog(c)} className="rounded-xl border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100">Adicionar ao orçamento</button>
+                              <button onClick={()=> iniciarEdicaoMaterial(c)} className="rounded-xl border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100">Editar</button>
+                              <button onClick={()=> removerMaterialCatalogo(c.id)} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-red-600 hover:bg-red-50">Excluir</button>
+                            </div>
+                          </td>
+                        </>
+                      )}}</td>
                           <td className="p-2">{c.obs || "—"}</td>
                           <td className="p-2 text-right">
                             <div className="flex justify-end gap-2">
@@ -775,6 +758,47 @@ export default function CalculadoraPrecificacao() {
         )}
 
         <footer className="text-center text-xs text-neutral-500">Dica: instale o app para usar offline. Faça login para sincronizar pela nuvem.</footer>
+
+        {/* LGPD Banner */}
+        {!lgpdAccepted && (
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white p-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+            <div className="mx-auto flex max-w-4xl flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-neutral-800">
+                Utilizamos seus dados (e-mail e conteúdos de orçamentos) apenas para fornecer o serviço e sincronizar entre dispositivos.
+                Ao continuar, você concorda com nossa <button onClick={()=> setLgpdShowModal(true)} className="underline">Política de Privacidade</button>.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={()=> setLgpdShowModal(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm shadow-sm hover:bg-neutral-100">Ler política</button>
+                <button onClick={acceptLGPD} className="rounded-2xl bg-black px-4 py-2 text-sm text-white shadow-sm hover:bg-neutral-800">Aceitar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* LGPD Modal */}
+        {lgpdShowModal && (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+            <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Política de Privacidade</h3>
+                <button onClick={()=> setLgpdShowModal(false)} className="rounded-xl border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-100">Fechar</button>
+              </div>
+              <div className="prose prose-sm max-w-none text-neutral-800">
+                <p>Coletamos apenas e-mail (para autenticação) e os dados de orçamentos/suas configurações. Usamos para fornecer o serviço, gerar PDFs e sincronizar entre dispositivos. Não vendemos seus dados. Você pode solicitar a exclusão definitiva a qualquer momento usando a funcionalidade de exclusão de conta.</p>
+                <ul>
+                  <li>Base legal: execução de contrato e consentimento (LGPD).</li>
+                  <li>Retenção: enquanto a conta estiver ativa ou conforme obrigações legais.</li>
+                  <li>Direitos: confirmação de tratamento, acesso, correção, anonimização, portabilidade e exclusão.</li>
+                </ul>
+                <p>Ao clicar em “Aceitar”, você consente com esta política.</p>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={()=> setLgpdShowModal(false)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 text-sm shadow-sm hover:bg-neutral-100">Fechar</button>
+                <button onClick={acceptLGPD} className="rounded-2xl bg-black px-4 py-2 text-sm text-white shadow-sm hover:bg-neutral-800">Aceitar</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {toast && (
           <div aria-live="polite" className="fixed bottom-4 right-4 z-50">
