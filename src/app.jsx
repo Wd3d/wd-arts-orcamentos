@@ -113,6 +113,9 @@ export default function CalculadoraPrecificacao() {
   const [lgpdAccepted, setLgpdAccepted] = useState(false);
   const [lgpdShowModal, setLgpdShowModal] = useState(false);
 
+  // Menu do usuário (dropdown)
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
   // PWA
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstallable, setIsInstallable] = useState(false);
@@ -175,6 +178,32 @@ export default function CalculadoraPrecificacao() {
 
   // LGPD helpers
   const acceptLGPD = () => { setLgpdAccepted(true); try { localStorage.setItem("lgpdAccepted-v1", "1"); } catch {} setLgpdShowModal(false); };
+
+  // Exclusão com 3 etapas (dupla confirmação + digitar EXCLUIR)
+  const confirmDeleteAccount = async () => {
+    const ok1 = window.confirm('Tem certeza que deseja excluir permanentemente a sua conta?');
+    if (!ok1) return;
+    const ok2 = window.confirm('Confirma novamente: essa ação é IRREVERSÍVEL e todos os dados vinculados à conta podem ser removidos.');
+    if (!ok2) return;
+    const typed = window.prompt('Para confirmar, digite EXCLUIR:');
+    if ((typed || '').trim().toUpperCase() !== 'EXCLUIR') {
+      alert('Texto incorreto. Operação cancelada.');
+      return;
+    }
+    try {
+      ensureFirebase();
+      const u = getAuth().currentUser;
+      if (!u) return;
+      await deleteUser(u);
+      pushToast('Conta excluída.');
+    } catch (e) {
+      if (e?.code === 'auth/requires-recent-login') {
+        alert('Por segurança, faça login novamente e tente excluir a conta.');
+      } else {
+        alert(e?.message || 'Falha ao excluir a conta');
+      }
+    }
+  };
 
   // ===== Auth e sync Firestore =====
   useEffect(() => {
@@ -516,18 +545,17 @@ export default function CalculadoraPrecificacao() {
           <div className="flex flex-wrap items-center gap-2">
             {/* Avatar da logo 50px no header */}
             <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={(e)=> onLogoUpload(e.target.files?.[0])} />
-            <button onClick={openLogoPicker} title="Editar logo" className="h-[50px] w-[50px] overflow-hidden rounded-full border border-neutral-300 bg-white shadow-sm">
-              {state.logoDataUrl ? (
-                <img src={state.logoDataUrl} alt="logo" className="h-full w-full object-cover" />
-              ) : (
-                <span className="grid h-full w-full place-items-center text-[10px] text-neutral-500">Logo</span>
-              )}
-            </button>
-
-            {user ? (
-              <>
-                <span className="text-sm text-neutral-600">Conectado: <span className="font-medium">{user.email}</span> — <span className="italic">{syncStatus}</span></span>
-                <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth); }catch{} }} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Sair</button>
+            <div className="relative">
+                  <button onClick={()=> setUserMenuOpen(v=>!v)} aria-haspopup="menu" aria-expanded={userMenuOpen} className="rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-100">
+                    Conta ▾
+                  </button>
+                  {userMenuOpen && (
+                    <div className="absolute right-0 z-30 mt-2 w-56 rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl">
+                      <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth);}catch{} setUserMenuOpen(false); }} className="w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100">Sair</button>
+                      <button onClick={()=>{ setUserMenuOpen(false); confirmDeleteAccount(); }} className="w-full rounded-xl px-3 py-2 text-left text-red-600 hover:bg-red-50">Excluir conta</button>
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <button onClick={()=> setAuthOpen(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Entrar</button>
