@@ -121,6 +121,26 @@ export default function CalculadoraPrecificacao() {
     window.__toastTmr = setTimeout(() => setToast(null), 2200);
   };
 
+  // Mensagens amigáveis para erros de Auth
+  const authMsg = (code) => {
+    switch (code) {
+      case 'auth/invalid-email': return 'E‑mail inválido.';
+      case 'auth/missing-email': return 'Informe seu e‑mail.';
+      case 'auth/missing-password': return 'Informe sua senha.';
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password': return 'E‑mail ou senha incorretos.';
+      case 'auth/user-not-found': return 'Usuário não encontrado.';
+      case 'auth/email-already-in-use': return 'Este e‑mail já está cadastrado.';
+      case 'auth/too-many-requests': return 'Muitas tentativas. Tente novamente mais tarde ou redefina a senha.';
+      default: return 'Falha de autenticação.';
+    }
+  };
+  const offerReset = async (email) => {
+    if (!email) { alert('Informe seu e‑mail para redefinir.'); return; }
+    try { ensureFirebase(); await sendPasswordResetEmail(getAuth(), email); pushToast('E‑mail de redefinição enviado.'); }
+    catch (e) { alert(e?.message || 'Falha ao enviar redefinição'); }
+  };
+
   // ====== Logo no header (50px circular, clicável) ======
   const logoInputRef = useRef(null);
   const openLogoPicker = () => logoInputRef?.current?.click();
@@ -779,9 +799,9 @@ export default function CalculadoraPrecificacao() {
               <button type="button" onClick={async()=>{ try{ ensureFirebase(); if(!authEmail) return alert('Informe seu e‑mail.'); await sendPasswordResetEmail(getAuth(), authEmail); pushToast('E‑mail de redefinição enviado.'); }catch(e){ alert(e?.message || 'Falha ao enviar redefinição'); } }} className="mb-4 text-left text-xs text-neutral-600 underline">Esqueci minha senha</button>
               <div className="flex gap-2">
                 {authMode === "signin" ? (
-                  <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ alert(e?.message || 'Falha ao entrar'); } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
+                  <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; const msg = authMsg(code); if(code==='auth/user-not-found'){ if(window.confirm(msg + ' Deseja criar uma conta agora?')) setAuthMode('signup'); } else if(code==='auth/invalid-credential' || code==='auth/wrong-password'){ if(window.confirm(msg + ' Deseja enviar e‑mail de redefinição?')) await offerReset(authEmail); } else { alert(msg); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
                 ) : (
-                  <button onClick={async()=>{ try{ ensureFirebase(); await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ alert(e?.message || 'Falha ao criar conta'); } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
+                  <button onClick={async()=>{ try{ ensureFirebase(); await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e‑mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e‑mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
                 )}
                 <button onClick={()=> setAuthMode(authMode === "signin" ? "signup" : "signin")} className="rounded-2xl border border-neutral-300 px-4 py-2">{authMode === "signin" ? "Criar conta" : "Já tenho conta"}</button>
               </div>
