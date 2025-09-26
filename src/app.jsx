@@ -236,7 +236,7 @@ export default function CalculadoraPrecificacao() {
     return () => { unsubA(); unsubB(); unsubC(); unsubP(); };
   }, [user]);
 
-  // ===== Service Worker & Install PWA =====
+  // ===== Service Worker & Install PWA / Outside-click para menu =====
   useEffect(() => { if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); }, []);
   useEffect(() => {
     const onBeforeInstall = (e) => { e.preventDefault(); setDeferredPrompt(e); setIsInstallable(true); };
@@ -247,7 +247,6 @@ export default function CalculadoraPrecificacao() {
   }, []);
   const instalarApp = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; setDeferredPrompt(null); setIsInstallable(false); };
 
-  // Fecha menu de conta ao clicar fora
   useEffect(() => {
     const onDocClick = (e) => {
       if (userMenuOpen && userMenuRef.current && !userMenuRef.current.contains(e.target)) {
@@ -303,6 +302,7 @@ export default function CalculadoraPrecificacao() {
   const updateMaterial = (id, patch) => setState((s) => ({ ...s, materiais: s.materiais.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 
   // ===== Favoritos =====
+  const [favoritosDocs, setFavoritosDocs] = useState([]);
   const toggleFavorito = async (mat) => {
     const desc = (mat.descricao || "").trim();
     const current = favoritos.find((f) => (f.descricao || "").trim() === desc);
@@ -319,7 +319,7 @@ export default function CalculadoraPrecificacao() {
     let next;
     if (current) next = favoritos.filter((f) => (f.descricao || "").trim() !== desc);
     else next = [...favoritos, { descricao: desc, unitPadrao: toNumber(mat.unit) }];
-    persistFavoritos(next);
+    setFavoritos(next); try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {}
     updateMaterial(mat.id, { fav: !current });
     pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
   };
@@ -338,7 +338,7 @@ export default function CalculadoraPrecificacao() {
         await batch.commit();
       } catch {}
     }
-    persistFavoritos([]);
+    setFavoritos([]); try { localStorage.setItem(FAV_KEY, JSON.stringify([])); } catch {}
     pushToast("Favoritos excluídos.");
   };
 
@@ -359,7 +359,7 @@ export default function CalculadoraPrecificacao() {
       return;
     }
     const next = exists ? orcamentos.map((o) => (o._id === id ? payload : o)) : [payload, ...orcamentos];
-    persistOrcamentos(next);
+    setOrcamentos(next); try { localStorage.setItem(ORCS_KEY, JSON.stringify(next)); } catch {}
     setState((s) => ({ ...s, _id: id }));
     pushToast(exists ? "Orçamento atualizado!" : "Orçamento salvo!");
   };
@@ -367,13 +367,13 @@ export default function CalculadoraPrecificacao() {
     const id = `${Date.now()}`;
     const payload = { ...state, _id: id, _savedAt: new Date().toISOString() };
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {} setState((s) => ({ ...s, _id: id })); pushToast("Orçamento salvo como novo (nuvem)!"); return; }
-    persistOrcamentos([payload, ...orcamentos]); setState((s) => ({ ...s, _id: id })); pushToast("Orçamento salvo como novo!");
+    const next = [payload, ...orcamentos]; setOrcamentos(next); try { localStorage.setItem(ORCS_KEY, JSON.stringify(next)); } catch {} setState((s) => ({ ...s, _id: id })); pushToast("Orçamento salvo como novo!");
   };
   const carregarOrcamento = (id) => { const found = orcamentos.find((o) => o._id === id); if (found) setState(found); setMostrarLista(false); setMostrarGestor(false); };
   const excluirOrcamento = async (id) => {
     if (!window.confirm("Excluir este orçamento?")) return;
     if (user && fbDb) { try { await deleteDoc(doc(fbDb, "users", user.uid, "orcamentos", id)); } catch {} if (state._id === id) setState(initial); pushToast("Orçamento excluído."); return; }
-    const next = orcamentos.filter((o) => o._id !== id); persistOrcamentos(next); if (state._id === id) setState(initial); pushToast("Orçamento excluído.");
+    const next = orcamentos.filter((o) => o._id !== id); setOrcamentos(next); try { localStorage.setItem(ORCS_KEY, JSON.stringify(next)); } catch {} if (state._id === id) setState(initial); pushToast("Orçamento excluído.");
   };
 
   // ===== Gestor de Materiais (catálogo) =====
@@ -401,14 +401,14 @@ export default function CalculadoraPrecificacao() {
       createdAt: new Date().toISOString(),
     };
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "catalogo", novo.id), novo); } catch {} }
-    persistCatalogo([novo, ...catalogo]);
+    const next = [novo, ...catalogo]; setCatalogo(next); try { localStorage.setItem(CATA_KEY, JSON.stringify(next)); } catch {}
     setCatForm({ nome: "", unidade: "", quantidade: "", preco: "", obs: "" });
     pushToast("Material cadastrado.");
   };
   const removerMaterialCatalogo = async (id) => {
     if (!window.confirm("Excluir este material do catálogo?")) return;
     if (user && fbDb) { try { await deleteDoc(doc(fbDb, "users", user.uid, "catalogo", id)); } catch {} }
-    persistCatalogo(catalogo.filter((c) => c.id !== id));
+    const next = catalogo.filter((c) => c.id !== id); setCatalogo(next); try { localStorage.setItem(CATA_KEY, JSON.stringify(next)); } catch {}
     pushToast("Material excluído.");
   };
   const iniciarEdicaoMaterial = (item) => { setEditCatId(item.id); setEditCatData({ nome: item.nome || "", unidade: item.unidade || "", quantidade: String(item.quantidade ?? ""), preco: String(item.preco ?? ""), obs: item.obs || "" }); };
@@ -417,8 +417,7 @@ export default function CalculadoraPrecificacao() {
     if (!editCatId) return;
     const patch = { ...editCatData, preco: toNumber(editCatData.preco), quantidade: toNumber(editCatData.quantidade) };
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "catalogo", editCatId), { ...(catalogo.find(c=>c.id===editCatId) || {}), ...patch, id: editCatId }); } catch {} }
-    const next = catalogo.map((c) => (c.id === editCatId ? { ...c, ...patch } : c));
-    persistCatalogo(next);
+    const next = catalogo.map((c) => (c.id === editCatId ? { ...c, ...patch } : c)); setCatalogo(next); try { localStorage.setItem(CATA_KEY, JSON.stringify(next)); } catch {}
     cancelarEdicaoMaterial();
     pushToast("Material atualizado.");
   };
@@ -431,10 +430,10 @@ export default function CalculadoraPrecificacao() {
   }, [catalogo, catBusca]);
 
   // ===== PDF =====
+  const mm = (v) => v * 2.83465; // 1 mm = 2.83465 pt
   const buildPDF = () => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const marginX = 48; let y = 56;
-    const mm = (v) => v * 2.83465; // 1 mm = 2.83465 pt
 
     // Logo (1,5 cm) no topo esquerdo
     const hasLogo = !!state.logoDataUrl;
@@ -547,7 +546,7 @@ export default function CalculadoraPrecificacao() {
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
       <div className="mx-auto max-w-6xl px-4">
-        {/* Cabeçalho minimal: Edição | Meus orçamentos | Gestor de materiais */}
+        {/* Cabeçalho minimal */}
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Calculadora de Precificação</h1>
@@ -583,7 +582,16 @@ export default function CalculadoraPrecificacao() {
               </div>
             ) : (
               <button onClick={()=> setAuthOpen(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Entrar</button>
-            )} placeholder="Ex.: Lembrancinhas aniversário" />
+            )}
+          </div>
+        </header>
+
+        {/* Form principal oculto quando lista/gestor estiverem ativos */}
+        {!mostrarLista && !mostrarGestor && (
+          <>
+            {/* Meta */}
+            <section className="mb-6 grid gap-3 rounded-2xl bg-white p-4 shadow-sm md:grid-cols-2 lg:grid-cols-3">
+              <LabeledInput label="Nome do orçamento / Projeto" value={state.orcamentoNome} onChange={(v) => setState((s) => ({ ...s, orcamentoNome: v }))} placeholder="Ex.: Lembrancinhas aniversário" />
               <LabeledInput label="Cliente" value={state.clienteNome} onChange={(v) => setState((s) => ({ ...s, clienteNome: v }))} placeholder="Nome do cliente" />
               <LabeledInput label="Contato (opcional)" value={state.clienteContato} onChange={(v) => setState((s) => ({ ...s, clienteContato: v }))} placeholder="WhatsApp / e-mail" />
               <LabeledInput label="Quantidade de unidades" value={state.quantidade} onChange={(v) => setState((s) => ({ ...s, quantidade: v }))} placeholder="1" inputMode="numeric" />
@@ -879,7 +887,7 @@ export default function CalculadoraPrecificacao() {
 
         {/* LGPD Modal */}
         {lgpdShowModal && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onMouseDown={(e)=> { if (e.target === e.currentTarget) setLgpdShowModal(false); }}>
             <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Política de Privacidade</h3>
@@ -912,7 +920,7 @@ export default function CalculadoraPrecificacao() {
 
         {/* Auth Modal – no cadastro pedimos a LOGO */}
         {authOpen && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onMouseDown={(e)=> { if (e.target === e.currentTarget) setAuthOpen(false); }}>
             <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">{authMode === "signin" ? "Entrar" : "Criar conta"}</h3>
