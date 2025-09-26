@@ -87,7 +87,7 @@ export default function CalculadoraPrecificacao() {
     _savedAt: undefined,
   };
 
-  const STORAGE_KEY = "precificacao-v2";
+  const STORAGE_KEY = "precificacao-v3";
   const FAV_KEY = "materiaisFavoritos-v1";
   const ORCS_KEY = "orcamentosSalvos-v1";
   const CATA_KEY = "catalogoMateriais-v1";
@@ -114,6 +114,7 @@ export default function CalculadoraPrecificacao() {
   const [authMode, setAuthMode] = useState("signin"); // signin | signup
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+  const [signupLogoDataUrl, setSignupLogoDataUrl] = useState("");
 
   // LGPD / Política de Privacidade
   const [lgpdAccepted, setLgpdAccepted] = useState(false);
@@ -152,16 +153,6 @@ export default function CalculadoraPrecificacao() {
     if (!email) { alert('Informe seu e‑mail para redefinir.'); return; }
     try { ensureFirebase(); await sendPasswordResetEmail(getAuth(), email); pushToast('E‑mail de redefinição enviado.'); }
     catch (e) { alert(e?.message || 'Falha ao enviar redefinição'); }
-  };
-
-  // ====== Logo no header (50px circular, clicável) ======
-  const logoInputRef = useRef(null);
-  const openLogoPicker = () => logoInputRef?.current?.click();
-  const onLogoUpload = (file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => setState((s) => ({ ...s, logoDataUrl: String(e.target?.result || "") }));
-    reader.readAsDataURL(file);
   };
 
   // ===== LocalStorage =====
@@ -220,6 +211,7 @@ export default function CalculadoraPrecificacao() {
   useEffect(() => {
     if (!user || !fbDb) return;
     setSyncStatus("syncing");
+
     const unsubA = onSnapshot(collection(fbDb, "users", user.uid, "orcamentos"), (snap) => {
       setOrcamentos(snap.docs.map((d) => d.data()));
       setSyncStatus("online");
@@ -230,7 +222,16 @@ export default function CalculadoraPrecificacao() {
     const unsubC = onSnapshot(collection(fbDb, "users", user.uid, "catalogo"), (snap) => {
       setCatalogo(snap.docs.map((d) => d.data()));
     });
-    return () => { unsubA(); unsubB(); unsubC(); };
+    // Perfil (logo enviada no cadastro)
+    const profileRef = doc(fbDb, 'users', user.uid, 'meta', 'profile');
+    const unsubP = onSnapshot(profileRef, (d) => {
+      if (d.exists()) {
+        const lg = d.data()?.logoDataUrl;
+        if (lg) setState((s) => ({ ...s, logoDataUrl: lg }));
+      }
+    });
+
+    return () => { unsubA(); unsubB(); unsubC(); unsubP(); };
   }, [user]);
 
   // ===== Service Worker & Install PWA =====
@@ -355,7 +356,7 @@ export default function CalculadoraPrecificacao() {
     if (user && fbDb) { try { await setDoc(doc(fbDb, "users", user.uid, "orcamentos", id), payload); } catch {} setState((s) => ({ ...s, _id: id })); pushToast("Orçamento salvo como novo (nuvem)!"); return; }
     persistOrcamentos([payload, ...orcamentos]); setState((s) => ({ ...s, _id: id })); pushToast("Orçamento salvo como novo!");
   };
-  const carregarOrcamento = (id) => { const found = orcamentos.find((o) => o._id === id); if (found) setState(found); setMostrarLista(false); };
+  const carregarOrcamento = (id) => { const found = orcamentos.find((o) => o._id === id); if (found) setState(found); setMostrarLista(false); setMostrarGestor(false); };
   const excluirOrcamento = async (id) => {
     if (!window.confirm("Excluir este orçamento?")) return;
     if (user && fbDb) { try { await deleteDoc(doc(fbDb, "users", user.uid, "orcamentos", id)); } catch {} if (state._id === id) setState(initial); pushToast("Orçamento excluído."); return; }
@@ -513,30 +514,21 @@ export default function CalculadoraPrecificacao() {
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
       <div className="mx-auto max-w-6xl px-4">
+        {/* Cabeçalho minimal: Edição | Meus orçamentos | Gestor de materiais */}
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {/* Avatar da logo 50px no header */}
-            <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={(e)=> onLogoUpload(e.target.files?.[0])} />
-            <button onClick={openLogoPicker} className="h-[50px] w-[50px] overflow-hidden rounded-full border border-neutral-300 bg-white shadow-sm" title="Clique para trocar a logo">
-              {state.logoDataUrl ? (
-                <img src={state.logoDataUrl} alt="Logo" className="h-full w-full object-cover" />
-              ) : (
-                <div className="grid h-full w-full place-items-center text-xs text-neutral-500">Logo</div>
-              )}
-            </button>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Calculadora de Precificação</h1>
-              <p className="text-sm text-neutral-600">Preencha e gere o PDF do orçamento sem expor custos internos.</p>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Calculadora de Precificação</h1>
+            <p className="text-sm text-neutral-600">Gere PDFs de orçamento sem expor custos internos.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Menu usuário ou Entrar */}
+            <button onClick={() => { setMostrarLista(false); setMostrarGestor(false); }} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Edição</button>
+            <button onClick={() => setMostrarLista(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
+            <button onClick={() => setMostrarGestor(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Gestor de materiais</button>
             {user ? (
               <div className="relative">
                 <button onClick={()=> setUserMenuOpen(v=>!v)} aria-haspopup="menu" aria-expanded={userMenuOpen} className="rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-100">Conta ▾</button>
                 {userMenuOpen && (
                   <div className="absolute right-0 z-30 mt-2 w-56 rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl">
-                    <button onClick={openLogoPicker} className="w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100">Alterar logo</button>
                     <button onClick={()=>{ setUserMenuOpen(false); confirmDeleteAccount(); }} className="w-full rounded-xl px-3 py-2 text-left text-red-600 hover:bg-red-50">Excluir conta</button>
                     <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth);}catch{} setUserMenuOpen(false); }} className="w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100">Sair</button>
                   </div>
@@ -544,21 +536,6 @@ export default function CalculadoraPrecificacao() {
               </div>
             ) : (
               <button onClick={()=> setAuthOpen(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Entrar</button>
-            )}
-
-            {(mostrarLista || mostrarGestor) ? (
-              <button onClick={() => { setMostrarLista(false); setMostrarGestor(false); }} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Voltar</button>
-            ) : (
-              <>
-                <button onClick={salvarOrcamento} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar orçamento</button>
-                <button onClick={salvarComoNovo} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar como novo</button>
-                <button onClick={() => setMostrarLista(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
-                <button onClick={() => setMostrarGestor(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Gestor de materiais</button>
-                <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
-                <button onClick={compartilharPDF} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Compartilhar PDF</button>
-                {isInstallable && (<button onClick={instalarApp} className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-green-700 shadow-sm hover:bg-green-50">Instalar app</button>)}
-                <button onClick={()=> setState(initial)} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Resetar</button>
-              </>
             )}
           </div>
         </header>
@@ -665,7 +642,7 @@ export default function CalculadoraPrecificacao() {
             </section>
 
             {/* Precificação */}
-            <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
+            <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm">
               <h2 className="mb-3 text-lg font-semibold">Precificação</h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <LabeledInput label="% de lucro desejada" suffix="%" value={state.lucroPct} onChange={(v) => setState((s) => ({ ...s, lucroPct: v }))} placeholder="0,00" inputMode="decimal" />
@@ -686,6 +663,18 @@ export default function CalculadoraPrecificacao() {
                 </ul>
               )}
             </section>
+
+            {/* Ações (botões no final do formulário) */}
+            <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button onClick={salvarOrcamento} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar orçamento</button>
+                <button onClick={salvarComoNovo} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Salvar como novo</button>
+                <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
+                <button onClick={compartilharPDF} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Compartilhar PDF</button>
+                {isInstallable && (<button onClick={instalarApp} className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-green-700 shadow-sm hover:bg-green-50">Instalar app</button>)}
+                <button onClick={()=> setState(initial)} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Resetar</button>
+              </div>
+            </section>
           </>
         )}
 
@@ -694,7 +683,7 @@ export default function CalculadoraPrecificacao() {
           <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {/* logo na lista */}
+                {/* avatar da logo na lista */}
                 <div className="h-8 w-8 overflow-hidden rounded-full border border-neutral-200 bg-white">
                   {state.logoDataUrl ? <img src={state.logoDataUrl} alt="Logo" className="h-full w-full object-cover" /> : null}
                 </div>
@@ -883,7 +872,7 @@ export default function CalculadoraPrecificacao() {
           </div>
         )}
 
-        {/* Auth Modal */}
+        {/* Auth Modal – no cadastro pedimos a LOGO */}
         {authOpen && (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
@@ -894,16 +883,29 @@ export default function CalculadoraPrecificacao() {
               <LabeledInput label="E-mail" value={authEmail} onChange={setAuthEmail} placeholder="voce@exemplo.com" type="email" name="email" autoComplete="email" autoFocus />
               <div className="mt-2"></div>
               <LabeledInput label="Senha" value={authPass} onChange={setAuthPass} placeholder="••••••••" type="password" name="password" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} />
+
+              {authMode === 'signup' && (
+                <div className="mt-3">
+                  <span className="mb-1 block text-sm font-medium text-neutral-800">Sua logo (mostrada no PDF)</span>
+                  <input type="file" accept="image/*" onChange={(e)=> { const f = e.target.files?.[0]; if (!f) return; const reader = new FileReader(); reader.onload = (ev)=> setSignupLogoDataUrl(String(ev.target?.result || "")); reader.readAsDataURL(f); }} className="block w-full rounded-xl border border-neutral-300 p-2 text-sm" />
+                  {signupLogoDataUrl && (
+                    <div className="mt-2 h-16 w-16 overflow-hidden rounded-lg border">
+                      <img src={signupLogoDataUrl} alt="Pré-visualização da logo" className="h-full w-full object-cover" />
+                    </div>
+                  )}
+                </div>
+              )}
+
               <button type="button" onClick={async()=>{ try{ ensureFirebase(); if(!authEmail) return alert('Informe seu e‑mail.'); await sendPasswordResetEmail(getAuth(), authEmail); pushToast('E‑mail de redefinição enviado.'); }catch(e){ alert(e?.message || 'Falha ao enviar redefinição'); } }} className="mb-4 mt-2 text-left text-xs text-neutral-600 underline">Esqueci minha senha</button>
               <div className="flex gap-2">
                 {authMode === "signin" ? (
                   <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; const msg = authMsg(code); if(code==='auth/user-not-found'){ if(window.confirm(msg + ' Deseja criar uma conta agora?')) setAuthMode('signup'); } else if(code==='auth/invalid-credential' || code==='auth/wrong-password'){ if(window.confirm(msg + ' Deseja enviar e‑mail de redefinição?')) await offerReset(authEmail); } else { alert(msg); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
                 ) : (
-                  <button onClick={async()=>{ try{ ensureFirebase(); await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e‑mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e‑mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
+                  <button onClick={async()=>{ try{ ensureFirebase(); const cred = await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); if (signupLogoDataUrl) { try { await setDoc(doc(fbDb, 'users', cred.user.uid, 'meta', 'profile'), { logoDataUrl: signupLogoDataUrl, updatedAt: serverTimestamp() }); setState((s)=> ({...s, logoDataUrl: signupLogoDataUrl})); } catch {} } setAuthOpen(false); pushToast('Conta criada.'); }catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e‑mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e‑mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
                 )}
                 <button onClick={()=> setAuthMode(authMode === "signin" ? "signup" : "signin")} className="rounded-2xl border border-neutral-300 px-4 py-2">{authMode === "signin" ? "Criar conta" : "Já tenho conta"}</button>
               </div>
-              <p className="mt-3 text-xs text-neutral-500">Seus orçamentos ficam disponíveis em todos os dispositivos quando logado.</p>
+              <p className="mt-3 text-xs text-neutral-500">No cadastro pedimos sua logo (opcional). Você pode alterar depois pelo suporte.</p>
             </div>
           </div>
         )}
