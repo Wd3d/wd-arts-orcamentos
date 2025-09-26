@@ -122,6 +122,8 @@ export default function CalculadoraPrecificacao() {
 
   // Menu do usuário (dropdown)
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+  const logoFileRef = useRef(null);
 
   // PWA
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -244,6 +246,17 @@ export default function CalculadoraPrecificacao() {
     return () => { window.removeEventListener("beforeinstallprompt", onBeforeInstall); window.removeEventListener("appinstalled", onInstalled); };
   }, []);
   const instalarApp = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; setDeferredPrompt(null); setIsInstallable(false); };
+
+  // Fecha menu de conta ao clicar fora
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (userMenuOpen && userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [userMenuOpen]);
 
   // ===== Cálculos =====
   const computed = useMemo(() => {
@@ -496,6 +509,26 @@ export default function CalculadoraPrecificacao() {
     } catch { const { doc } = buildPDF(); const blob = doc.output("blob"); const url = URL.createObjectURL(blob); window.open(url, "_blank"); }
   };
 
+  // Troca de logo pelo menu do usuário
+  const openLogoPicker = () => logoFileRef.current?.click();
+  const onLogoFileChange = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = String(ev.target?.result || "");
+      setState((s) => ({ ...s, logoDataUrl: dataUrl }));
+      try {
+        if (user && fbDb) {
+          await setDoc(doc(fbDb, 'users', user.uid, 'meta', 'profile'), { logoDataUrl: dataUrl, updatedAt: serverTimestamp() });
+          pushToast('Logo atualizada.');
+        }
+      } catch {}
+    };
+    reader.readAsDataURL(f);
+    e.target.value = '';
+  };
+
   // ===== Derivados =====
   const norm = (s) => (s ?? "").toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const orcLista = useMemo(() => {
@@ -525,27 +558,32 @@ export default function CalculadoraPrecificacao() {
             <button onClick={() => setMostrarLista(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Meus orçamentos</button>
             <button onClick={() => setMostrarGestor(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Gestor de materiais</button>
             {user ? (
-              <div className="relative">
-                <button onClick={()=> setUserMenuOpen(v=>!v)} aria-haspopup="menu" aria-expanded={userMenuOpen} className="rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm hover:bg-neutral-100">Conta ▾</button>
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setUserMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={userMenuOpen}
+                  className="h-12 w-12 overflow-hidden rounded-full border border-neutral-300 bg-white shadow-sm hover:opacity-90"
+                  title="Conta"
+                >
+                  {state.logoDataUrl ? (
+                    <img src={state.logoDataUrl} alt="Logo" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-sm text-neutral-500">👤</div>
+                  )}
+                </button>
                 {userMenuOpen && (
                   <div className="absolute right-0 z-30 mt-2 w-56 rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl">
-                    <button onClick={()=>{ setUserMenuOpen(false); confirmDeleteAccount(); }} className="w-full rounded-xl px-3 py-2 text-left text-red-600 hover:bg-red-50">Excluir conta</button>
+                    <button onClick={openLogoPicker} className="w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100">Trocar logo</button>
+                    <button onClick={() => { setUserMenuOpen(false); confirmDeleteAccount(); }} className="w-full rounded-xl px-3 py-2 text-left text-red-600 hover:bg-red-50">Excluir conta</button>
                     <button onClick={async()=>{ try{ ensureFirebase(); await fbSignOut(fbAuth);}catch{} setUserMenuOpen(false); }} className="w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100">Sair</button>
                   </div>
                 )}
+                <input ref={logoFileRef} type="file" accept="image/*" className="hidden" onChange={onLogoFileChange} />
               </div>
             ) : (
               <button onClick={()=> setAuthOpen(true)} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Entrar</button>
-            )}
-          </div>
-        </header>
-
-        {/* Form principal oculto quando lista/gestor estiverem ativos */}
-        {!mostrarLista && !mostrarGestor && (
-          <>
-            {/* Meta */}
-            <section className="mb-6 grid gap-3 rounded-2xl bg-white p-4 shadow-sm md:grid-cols-2 lg:grid-cols-3">
-              <LabeledInput label="Nome do orçamento / Projeto" value={state.orcamentoNome} onChange={(v) => setState((s) => ({ ...s, orcamentoNome: v }))} placeholder="Ex.: Lembrancinhas aniversário" />
+            )} placeholder="Ex.: Lembrancinhas aniversário" />
               <LabeledInput label="Cliente" value={state.clienteNome} onChange={(v) => setState((s) => ({ ...s, clienteNome: v }))} placeholder="Nome do cliente" />
               <LabeledInput label="Contato (opcional)" value={state.clienteContato} onChange={(v) => setState((s) => ({ ...s, clienteContato: v }))} placeholder="WhatsApp / e-mail" />
               <LabeledInput label="Quantidade de unidades" value={state.quantidade} onChange={(v) => setState((s) => ({ ...s, quantidade: v }))} placeholder="1" inputMode="numeric" />
