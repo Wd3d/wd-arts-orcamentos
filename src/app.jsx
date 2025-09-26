@@ -758,6 +758,38 @@ export default function CalculadoraPrecificacao() {
               <LabeledTextarea label="Observações (mostradas no PDF)" value={state.observacoes} onChange={(v)=>setState(s=>({...s, observacoes:v}))} placeholder="Ex.: Arte inclusa. Alterações após aprovação podem gerar custo adicional." />
             </div>
 
+            {/* Produção */}
+            <h2 className="text-lg font-semibold">Produção (por unidade)</h2>
+            <div className="grid gap-3 md:grid-cols-3">
+              <LabeledInput
+                label="Minutos para produzir uma unidade"
+                value={state.minutosPorUnidade}
+                onChange={(v)=>setState(s=>({...s, minutosPorUnidade:v}))}
+                placeholder="0"
+                inputMode="decimal"
+              />
+              <LabeledInput
+                label="Mão de obra (R$/min)"
+                prefix="R$"
+                value={state.maoDeObraPorMin}
+                onChange={(v)=>setState(s=>({...s, maoDeObraPorMin:v}))}
+                placeholder="0,00"
+                inputMode="decimal"
+              />
+              <LabeledInput
+                label="Custo fixo (R$/min)"
+                prefix="R$"
+                value={state.custoFixoPorMin}
+                onChange={(v)=>setState(s=>({...s, custoFixoPorMin:v}))}
+                placeholder="0,00"
+                inputMode="decimal"
+              />
+            </div>
+            <div className="mt-2 grid gap-2 text-sm text-neutral-700 md:grid-cols-2">
+              <div>Custo de mão de obra (total): <span className="font-semibold">{brl(computed.custoMaoObra)}</span></div>
+              <div>Custo fixo alocado (total): <span className="font-semibold">{brl(computed.custoFixo)}</span></div>
+            </div>
+
             {/* Materiais */}
             <h2 className="text-lg font-semibold">Materiais do orçamento</h2>
             <div className="space-y-3">
