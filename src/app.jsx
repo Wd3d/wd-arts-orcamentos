@@ -114,6 +114,7 @@ export default function CalculadoraPrecificacao() {
   const [authMode, setAuthMode] = useState("signin"); // signin | signup
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+  const [signupPass2, setSignupPass2] = useState(""); // <<< NOVO: confirmar senha
   const [signupLogoDataUrl, setSignupLogoDataUrl] = useState("");
 
   // LGPD / Política de Privacidade
@@ -718,7 +719,12 @@ export default function CalculadoraPrecificacao() {
                 <button onClick={gerarPDF} className="rounded-2xl bg-black px-4 py-2 text-white shadow-sm hover:bg-neutral-800">Gerar PDF</button>
                 <button onClick={compartilharPDF} className="rounded-2xl border border-neutral-300 bg-white px-4 py-2 shadow-sm hover:bg-neutral-100">Compartilhar PDF</button>
                 {isInstallable && (<button onClick={instalarApp} className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-green-700 shadow-sm hover:bg-green-50">Instalar app</button>)}
-                <button onClick={()=> setState(initial)} className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50">Resetar</button>
+                <button
+                  onClick={() => setState((s) => ({ ...initial, logoDataUrl: s.logoDataUrl }))}
+                  className="rounded-2xl border border-red-300 bg-white px-4 py-2 text-red-600 shadow-sm hover:bg-red-50"
+                >
+                  Resetar
+                </button>
               </div>
             </section>
           </>
@@ -928,11 +934,12 @@ export default function CalculadoraPrecificacao() {
               </div>
               <LabeledInput label="E-mail" value={authEmail} onChange={setAuthEmail} placeholder="voce@exemplo.com" type="email" name="email" autoComplete="email" autoFocus />
               <div className="mt-2"></div>
-              <LabeledInput label="Senha" value={authPass} onChange={setAuthPass} placeholder="••••••••" type="password" name="password" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} />
+              <LabeledInput label="Senha" value={authPass} onChange={setAuthPass} placeholder="••••••••" type="password" name="password" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} reveal />
 
               {authMode === 'signup' && (
                 <div className="mt-3">
-                  <span className="mb-1 block text-sm font-medium text-neutral-800">Sua logo (mostrada no PDF)</span>
+                  <LabeledInput label="Confirmar senha" value={signupPass2} onChange={setSignupPass2} placeholder="Repita a senha" type="password" name="password2" autoComplete="new-password" reveal />
+                  <span className="mb-1 mt-3 block text-sm font-medium text-neutral-800">Sua logo (mostrada no PDF)</span>
                   <input type="file" accept="image/*" onChange={(e)=> { const f = e.target.files?.[0]; if (!f) return; const reader = new FileReader(); reader.onload = (ev)=> setSignupLogoDataUrl(String(ev.target?.result || "")); reader.readAsDataURL(f); }} className="block w-full rounded-xl border border-neutral-300 p-2 text-sm" />
                   {signupLogoDataUrl && (
                     <div className="mt-2 h-16 w-16 overflow-hidden rounded-lg border">
@@ -947,7 +954,7 @@ export default function CalculadoraPrecificacao() {
                 {authMode === "signin" ? (
                   <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; const msg = authMsg(code); if(code==='auth/user-not-found'){ if(window.confirm(msg + ' Deseja criar uma conta agora?')) setAuthMode('signup'); } else if(code==='auth/invalid-credential' || code==='auth/wrong-password'){ if(window.confirm(msg + ' Deseja enviar e‑mail de redefinição?')) await offerReset(authEmail); } else { alert(msg); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
                 ) : (
-                  <button onClick={async()=>{ try{ ensureFirebase(); const cred = await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); if (signupLogoDataUrl) { try { await setDoc(doc(fbDb, 'users', cred.user.uid, 'meta', 'profile'), { logoDataUrl: signupLogoDataUrl, updatedAt: serverTimestamp() }); setState((s)=> ({...s, logoDataUrl: signupLogoDataUrl})); } catch {} } setAuthOpen(false); pushToast('Conta criada.'); }catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e‑mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e‑mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
+                  <button onClick={async()=>{ try{ ensureFirebase(); if (authPass !== signupPass2) { alert('As senhas não conferem.'); return; } const cred = await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); if (signupLogoDataUrl) { try { await setDoc(doc(fbDb, 'users', cred.user.uid, 'meta', 'profile'), { logoDataUrl: signupLogoDataUrl, updatedAt: serverTimestamp() }); setState((s)=> ({...s, logoDataUrl: signupLogoDataUrl})); } catch {} } setAuthOpen(false); pushToast('Conta criada.'); }catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e-mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e-mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
                 )}
                 <button onClick={()=> setAuthMode(authMode === "signin" ? "signup" : "signin")} className="rounded-2xl border border-neutral-300 px-4 py-2">{authMode === "signin" ? "Criar conta" : "Já tenho conta"}</button>
               </div>
@@ -961,14 +968,16 @@ export default function CalculadoraPrecificacao() {
 }
 
 // =============== INPUTS ===============
-function LabeledInput({ label, prefix, suffix, value, onChange, placeholder, inputMode, type = "text", name, autoComplete, onKeyDown, autoFocus }) {
+function LabeledInput({ label, prefix, suffix, value, onChange, placeholder, inputMode, type = "text", name, autoComplete, onKeyDown, autoFocus, reveal = false }) {
+  const [show, setShow] = useState(false);
+  const isPwd = type === "password" && reveal;
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-neutral-800">{label}</span>
       <div className="flex items-stretch overflow-hidden rounded-xl border border-neutral-300 focus-within:ring-2 focus-within:ring-black/20">
         {prefix && <span className="flex items-center px-3 text-neutral-500">{prefix}</span>}
         <input
-          type={type}
+          type={isPwd ? (show ? "text" : "password") : type}
           name={name}
           autoComplete={autoComplete}
           onKeyDown={onKeyDown}
@@ -979,6 +988,16 @@ function LabeledInput({ label, prefix, suffix, value, onChange, placeholder, inp
           inputMode={inputMode}
           className="min-w-0 flex-1 bg-white px-3 py-2 outline-none"
         />
+        {isPwd && (
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            aria-label={show ? "Ocultar senha" : "Mostrar senha"}
+            className="flex items-center px-3 text-xs text-neutral-600 hover:text-neutral-900"
+          >
+            {show ? "Ocultar" : "Mostrar"}
+          </button>
+        )}
         {suffix && <span className="flex items-center px-3 text-neutral-500">{suffix}</span>}
       </div>
     </label>
