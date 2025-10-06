@@ -324,6 +324,16 @@ export default function CalculadoraPrecificacao() {
     updateMaterial(mat.id, { fav: !current });
     pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
   };
+  const desfavoritar = async (fav) => {
+    if (user && fbDb && fav?.id) {
+      try { await deleteDoc(doc(fbDb, "users", user.uid, "favoritos", fav.id)); } catch {}
+    }
+    const isSame = (a,b)=> ((a?.id && b?.id) ? a.id===b.id : ((a?.descricao||'').trim() === (b?.descricao||'').trim()));
+    const next = favoritos.filter((f)=> !isSame(f, fav));
+    setFavoritos(next); try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {}
+    pushToast("Removido dos favoritos.");
+  };
+  
   const addFromFavorito = (fav) => {
     const nextId = (state.materiais.at(-1)?.id || 0) + 1;
     setState((s) => ({ ...s, materiais: [...s.materiais, { id: nextId, descricao: fav.descricao, qtd: "", unit: String(fav.unitPadrao ?? ""), fav: true }] }));
@@ -497,8 +507,20 @@ export default function CalculadoraPrecificacao() {
     const nomeArquivo = (state.orcamentoNome || "wd-arts").trim().replaceAll(" ", "-").toLowerCase();
     return { doc, nomeArquivo };
   };
-  const gerarPDF = () => { const { doc, nomeArquivo } = buildPDF(); doc.save(`orcamento-${nomeArquivo}.pdf`); };
+  const gerarPDF = async () => {
+    try {
+      const ask = window.confirm("Deseja salvar este orçamento antes de gerar o PDF?");
+      if (ask) await salvarOrcamento();
+    } catch {}
+    const { doc, nomeArquivo } = buildPDF();
+    doc.save(`orcamento-${nomeArquivo}.pdf`);
+  };
   const compartilharPDF = async () => {
+    try {
+      const ask = window.confirm("Deseja salvar este orçamento antes de compartilhar o PDF?");
+      if (ask) await salvarOrcamento();
+    } catch {}
+    try {
     try {
       const { doc, nomeArquivo } = buildPDF();
       const blob = doc.output("blob");
@@ -604,23 +626,40 @@ export default function CalculadoraPrecificacao() {
 
             {/* Materiais */}
             <section className="mb-8 rounded-2xl bg-white p-4 shadow-sm">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-lg font-semibold">Materiais</h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-sm text-neutral-600">Favoritos:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {favoritos.length === 0 && <span className="text-sm text-neutral-500">Nenhum favorito ainda</span>}
-                    {favoritos.map((f, idx) => (
-                      <button key={idx} onClick={() => addFromFavorito(f)} className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm hover:bg-neutral-100">{f.descricao}</button>
-                    ))}
+              </div>
+
+              <div className="mb-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-sm font-medium text-neutral-800">Minha lista de materiais (favoritos)</div>
+                  <div className="flex gap-2">
                     {favoritos.length > 0 && (
-                      <button onClick={limparFavoritos} className="rounded-full border border-red-300 bg-white px-3 py-1 text-sm text-red-600 hover:bg-red-50">Limpar favoritos</button>
+                      <button onClick={limparFavoritos} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Limpar</button>
                     )}
                   </div>
                 </div>
-              </div>
-
-              <div className="overflow-auto">
+                {favoritos.length === 0 ? (
+                  <div className="text-sm text-neutral-500">Nenhum favorito ainda. Clique na estrela (★) na tabela para adicionar.</div>
+                ) : (
+                  <ul className="divide-y divide-neutral-200">
+                    {favoritos.map((f) => (
+                      <li key={f.id || f.descricao} className="flex items-center justify-between py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-neutral-900">{f.descricao}</div>
+                          {Number.isFinite(Number(f.unitPadrao)) && (
+                            <div className="text-xs text-neutral-500">Unitário padrão: {brl(toNumber(f.unitPadrao))}</div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => addFromFavorito(f)} className="rounded-xl border border-neutral-300 bg-white px-3 py-1 text-xs hover:bg-neutral-100">Adicionar</button>
+                          <button onClick={() => desfavoritar(f)} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Desfavoritar</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div><div className="overflow-auto">
                 <table className="w-full table-auto border-collapse">
                   <thead>
                     <tr className="bg-neutral-100 text-left text-sm">
