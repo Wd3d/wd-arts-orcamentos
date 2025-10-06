@@ -306,23 +306,41 @@ export default function CalculadoraPrecificacao() {
   const [favoritosDocs, setFavoritosDocs] = useState([]);
   const toggleFavorito = async (mat) => {
     const desc = (mat.descricao || "").trim();
-    const current = favoritos.find((f) => (f.descricao || "").trim() === desc);
+    if (!desc) { alert("Preencha a descrição do material para favoritar."); return; }
+    const unitPadrao = toNumber(mat.unit);
+    const current = favoritos.find((f) => (f.descricao || "").trim().toLowerCase() === desc.toLowerCase());
+    const isSame = (a,b)=> ((a?.id && b?.id) ? a.id===b.id : ((a?.descricao||'').trim().toLowerCase() === (b?.descricao||'').trim().toLowerCase()));
 
     if (user && fbDb) {
       try {
-        if (current?.id) await deleteDoc(doc(fbDb, "users", user.uid, "favoritos", current.id));
-        else await addDoc(collection(fbDb, "users", user.uid, "favoritos"), { descricao: desc, unitPadrao: toNumber(mat.unit), createdAt: serverTimestamp() });
+        if (current?.id) {
+          await deleteDoc(doc(fbDb, "users", user.uid, "favoritos", current.id));
+          setFavoritos((prev) => prev.filter((f) => !isSame(f, current)));
+          updateMaterial(mat.id, { fav: false });
+          pushToast("Removido dos favoritos.");
+        } else {
+          const ref = await addDoc(collection(fbDb, "users", user.uid, "favoritos"), { descricao: desc, unitPadrao, createdAt: serverTimestamp() });
+          setFavoritos((prev) => [...prev, { id: ref.id, descricao: desc, unitPadrao }]);
+          updateMaterial(mat.id, { fav: true });
+          pushToast("Adicionado aos favoritos.");
+        }
+        return;
       } catch {}
-      updateMaterial(mat.id, { fav: !current });
-      pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
-      return;
     }
+
+    // Local (sem login)
     let next;
-    if (current) next = favoritos.filter((f) => (f.descricao || "").trim() !== desc);
-    else next = [...favoritos, { descricao: desc, unitPadrao: toNumber(mat.unit) }];
-    setFavoritos(next); try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {}
-    updateMaterial(mat.id, { fav: !current });
-    pushToast(current ? "Removido dos favoritos." : "Adicionado aos favoritos.");
+    if (current) {
+      next = favoritos.filter((f) => !isSame(f, current));
+      updateMaterial(mat.id, { fav: false });
+      pushToast("Removido dos favoritos.");
+    } else {
+      next = [...favoritos, { descricao: desc, unitPadrao }];
+      updateMaterial(mat.id, { fav: true });
+      pushToast("Adicionado aos favoritos.");
+    }
+    setFavoritos(next);
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch {}
   };
   const desfavoritar = async (fav) => {
     if (user && fbDb && fav?.id) {
@@ -352,6 +370,17 @@ export default function CalculadoraPrecificacao() {
     setFavoritos([]); try { localStorage.setItem(FAV_KEY, JSON.stringify([])); } catch {}
     pushToast("Favoritos excluídos.");
   };
+
+  // Mantém o ícone ★ sincronizado com a lista de favoritos
+  useEffect(() => {
+    setState((s) => ({
+      ...s,
+      materiais: s.materiais.map((m) => {
+        const fav = favoritos.some((f) => (f.descricao || "").trim().toLowerCase() === (m.descricao || "").trim().toLowerCase());
+        return fav === m.fav ? m : { ...m, fav };
+      }),
+    }));
+  }, [favoritos]);
 
   // ===== Salvar / Abrir / Excluir orçamentos =====
   const salvarOrcamento = async () => {
@@ -649,6 +678,38 @@ export default function CalculadoraPrecificacao() {
               <div className="mb-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-sm font-medium text-neutral-800">Minha lista de materiais (favoritos)</div>
+                  {favoritos.length > 0 && (
+                    <button onClick={limparFavoritos} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Limpar</button>
+                  )}
+                </div>
+                {favoritos.length === 0 ? (
+                  <div className="text-sm text-neutral-500">Nenhum favorito ainda. Clique na estrela (★) na tabela para adicionar.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {favoritos.map((f) => (
+                      <div
+                        key={f.id || f.descricao}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => addFromFavorito(f)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') addFromFavorito(f); }}
+                        className="group inline-flex max-w-[260px] items-center gap-2 truncate rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm hover:bg-neutral-100"
+                        title="Adicionar ao orçamento"
+                      >
+                        <span className="truncate">{f.descricao}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); desfavoritar(f); }}
+                          className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-xs leading-none text-neutral-600 hover:bg-neutral-200"
+                          title="Remover dos favoritos"
+                          aria-label={`Remover ${f.descricao} dos favoritos`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
                   <div className="flex gap-2">
                     {favoritos.length > 0 && (
                       <button onClick={limparFavoritos} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Limpar</button>
