@@ -675,6 +675,7 @@ export default function CalculadoraPrecificacao() {
                 <h2 className="text-lg font-semibold">Materiais</h2>
               </div>
 
+              {/* Favoritos / Meus materiais */}
               <div className="mb-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-sm font-medium text-neutral-800">Minha lista de materiais (favoritos)</div>
@@ -710,33 +711,9 @@ export default function CalculadoraPrecificacao() {
                   </div>
                 )}
               </div>
-                  <div className="flex gap-2">
-                    {favoritos.length > 0 && (
-                      <button onClick={limparFavoritos} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Limpar</button>
-                    )}
-                  </div>
-                </div>
-                {favoritos.length === 0 ? (
-                  <div className="text-sm text-neutral-500">Nenhum favorito ainda. Clique na estrela (★) na tabela para adicionar.</div>
-                ) : (
-                  <ul className="divide-y divide-neutral-200">
-                    {favoritos.map((f) => (
-                      <li key={f.id || f.descricao} className="flex items-center justify-between py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-neutral-900">{f.descricao}</div>
-                          {Number.isFinite(Number(f.unitPadrao)) && (
-                            <div className="text-xs text-neutral-500">Unitário padrão: {brl(toNumber(f.unitPadrao))}</div>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => addFromFavorito(f)} className="rounded-xl border border-neutral-300 bg-white px-3 py-1 text-xs hover:bg-neutral-100">Adicionar</button>
-                          <button onClick={() => desfavoritar(f)} className="rounded-xl border border-red-300 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50">Desfavoritar</button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div><div className="overflow-auto">
+
+              {/* Tabela de materiais do orçamento */}
+              <div className="overflow-auto">
                 <table className="w-full table-auto border-collapse">
                   <thead>
                     <tr className="bg-neutral-100 text-left text-sm">
