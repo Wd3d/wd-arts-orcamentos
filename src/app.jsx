@@ -516,19 +516,35 @@ export default function CalculadoraPrecificacao() {
     doc.save(`orcamento-${nomeArquivo}.pdf`);
   };
   const compartilharPDF = async () => {
+    // Oferece salvar antes de compartilhar
     try {
       const ask = window.confirm("Deseja salvar este orçamento antes de compartilhar o PDF?");
       if (ask) await salvarOrcamento();
-    } catch {}
-    try {
+    } catch (e) {
+      // ignora
+    }
+
     try {
       const { doc, nomeArquivo } = buildPDF();
       const blob = doc.output("blob");
       const file = new File([blob], `orcamento-${nomeArquivo}.pdf`, { type: "application/pdf" });
+
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: "Orçamento", text: state.orcamentoNome ? `Orçamento: ${state.orcamentoNome}` : "" });
-      } else { const url = URL.createObjectURL(blob); window.open(url, "_blank"); }
-    } catch { const { doc } = buildPDF(); const blob = doc.output("blob"); const url = URL.createObjectURL(blob); window.open(url, "_blank"); }
+      } else {
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      }
+    } catch (e) {
+      try {
+        const { doc } = buildPDF();
+        const blob = doc.output("blob");
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      } catch (_) {
+        alert("Não foi possível gerar/compartilhar o PDF.");
+      }
+    }
   };
 
   // Troca de logo pelo menu do usuário
