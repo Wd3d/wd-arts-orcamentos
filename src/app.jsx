@@ -114,7 +114,7 @@ export default function CalculadoraPrecificacao() {
   const [authMode, setAuthMode] = useState("signin"); // signin | signup
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
-  const [signupPass2, setSignupPass2] = useState(""); // <<< NOVO: confirmar senha
+  const [signupPass2, setSignupPass2] = useState(""); // confirmar senha
   const [signupLogoDataUrl, setSignupLogoDataUrl] = useState("");
 
   // LGPD / Política de Privacidade
@@ -141,20 +141,20 @@ export default function CalculadoraPrecificacao() {
   // Mensagens amigáveis para erros de Auth
   const authMsg = (code) => {
     switch (code) {
-      case 'auth/invalid-email': return 'E‑mail inválido.';
-      case 'auth/missing-email': return 'Informe seu e‑mail.';
+      case 'auth/invalid-email': return 'E-mail inválido.';
+      case 'auth/missing-email': return 'Informe seu e-mail.';
       case 'auth/missing-password': return 'Informe sua senha.';
       case 'auth/invalid-credential':
-      case 'auth/wrong-password': return 'E‑mail ou senha incorretos.';
+      case 'auth/wrong-password': return 'E-mail ou senha incorretos.';
       case 'auth/user-not-found': return 'Usuário não encontrado.';
-      case 'auth/email-already-in-use': return 'Este e‑mail já está cadastrado.';
+      case 'auth/email-already-in-use': return 'Este e-mail já está cadastrado.';
       case 'auth/too-many-requests': return 'Muitas tentativas. Tente novamente mais tarde ou redefina a senha.';
       default: return 'Falha de autenticação.';
     }
   };
   const offerReset = async (email) => {
-    if (!email) { alert('Informe seu e‑mail para redefinir.'); return; }
-    try { ensureFirebase(); await sendPasswordResetEmail(getAuth(), email); pushToast('E‑mail de redefinição enviado.'); }
+    if (!email) { alert('Informe seu e-mail para redefinir.'); return; }
+    try { ensureFirebase(); await sendPasswordResetEmail(getAuth(), email); pushToast('E-mail de redefinição enviado.'); }
     catch (e) { alert(e?.message || 'Falha ao enviar redefinição'); }
   };
 
@@ -497,68 +497,42 @@ export default function CalculadoraPrecificacao() {
     if (state.clienteContato) { doc.text(`Contato: ${state.clienteContato}`, marginX, y); y += 14; }
     doc.text(`Quantidade: ${computed.quantidade}`, marginX, y); y += 18;
 
-// Itens – valores com PERDA + LUCRO + TAXA (apenas no PDF)
-const perdaFactor = 1 + (computed.perda || 0);
-const lucroPct = toNumber(state.lucroPct) / 100;
-const taxaPct  = toNumber(state.taxaPct) / 100;
-const denom    = 1 - taxaPct;
-// se taxa >= 100%, evitamos divisão por zero: aplica só o lucro
-const vendaFactor = denom > 0 ? (1 + lucroPct) / denom : (1 + lucroPct);
+    // Itens — agora com PERDA + LUCRO + TAXA aplicados no valor unitário
+    const perdaFactor = 1 + (computed.perda || 0);
+    const lucro = toNumber(state.lucroPct) / 100;
+    const taxa = toNumber(state.taxaPct) / 100;
+    const lucroFactor = 1 + (Number.isFinite(lucro) ? lucro : 0);
+    const taxaDivisor = (1 - (Number.isFinite(taxa) ? taxa : 0));
 
-// fator final para o valor unitário exibido no PDF
-const fatorFinal = perdaFactor * vendaFactor;
+    let subtotalMateriaisPDF = 0;
 
-const linhas = computed.materiais
-  .filter((m) => (m.descricao || "").trim() !== "")
-  .map((m) => {
-    const unitAdj = m.unitNum * fatorFinal;
-    const totalAdj = m.qtdNum * unitAdj;
-    return [m.descricao, String(m.qtdNum), brl(unitAdj), brl(totalAdj)];
-  });
+    const linhas = computed.materiais
+      .filter((m) => (m.descricao || "").trim() !== "")
+      .map((m) => {
+        const unitBase = m.unitNum * perdaFactor;                 // aplica perda ao custo unitário do material
+        let unitAdj = unitBase * lucroFactor;                     // aplica lucro
+        unitAdj = taxaDivisor > 0 ? (unitAdj / taxaDivisor) : NaN; // “bruta” para cobrir taxa (%)
+        const totalAdj = m.qtdNum * unitAdj;
+        if (Number.isFinite(totalAdj)) subtotalMateriaisPDF += totalAdj;
+        return [m.descricao, String(m.qtdNum), brl(unitAdj), brl(totalAdj)];
+      });
 
-autoTable(doc, {
-  startY: y,
-  head: [["Descrição", "Qtd usada", "Valor unit (R$)", "Valor usado (R$)"]],
-  body: linhas.length ? linhas : [["—", "—", "—", "—"]],
-  theme: "grid",
-  styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
-  headStyles: { fillColor: [0,0,0], textColor: [255,255,255] },
-  margin: { left: marginX, right: marginX }
-});
+    autoTable(doc, {
+      startY: y,
+      head: [["Descrição", "Qtd usada", "Valor unit (R$)", "Valor usado (R$)"]],
+      body: linhas.length ? linhas : [["—", "—", "—", "—"]],
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+      headStyles: { fillColor: [0,0,0], textColor: [255,255,255] },
+      margin: { left: marginX, right: marginX }
+    });
 
-y = (doc.lastAutoTable?.finalY || y) + 10;
+    y = (doc.lastAutoTable?.finalY || y) + 10;
 
-// (opcional) Nota no PDF informando o que está embutido nos valores
-doc.setFont("helvetica", "italic");
-doc.setFontSize(8);
-doc.text(
-  "",
-  marginX,
-  y
-);
-y += 10;
-doc.setFont("helvetica", "normal");
-doc.setFontSize(10);
-
-
-// Totais (sem expor infos internas) — Subtotal de materiais COM perda + lucro + taxa
-
-doc.setFont("helvetica", "normal");
-
-// Recalcula o mesmo fator usado nos itens do PDF
-const perdaFactor = 1 + (computed.perda || 0);
-const lucroPct = toNumber(state.lucroPct) / 100;
-const taxaPct  = toNumber(state.taxaPct) / 100;
-const denom    = 1 - taxaPct;
-const vendaFactor = denom > 0 ? (1 + lucroPct) / denom : (1 + lucroPct);
-const fatorFinal = perdaFactor * vendaFactor;
-
-// Soma dos itens já “de venda”
-const subtotalMateriaisVenda = computed.materiais
-  .filter((m) => (m.descricao || "").trim() !== "")
-  .reduce((acc, m) => acc + (m.qtdNum * (m.unitNum * fatorFinal)), 0);
-
-doc.text(`Subtotal materiais: ${brl(subtotalMateriaisVenda)}`, marginX, y); y += 14;
+    // Totais (sem expor infos internos)
+    doc.setFont("helvetica", "normal");
+    // Subtotal de materiais AGORA condizente com as colunas (perda + lucro + taxa)
+    doc.text(`Subtotal materiais: ${Number.isFinite(subtotalMateriaisPDF) ? brl(subtotalMateriaisPDF) : "—"}`, marginX, y); y += 14;
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(12);
     doc.text(`Preço unitário: ${Number.isFinite(computed.precoFinal) ? brl(computed.precoFinal) : "—"}`, marginX, y); y += 18;
@@ -1080,10 +1054,10 @@ doc.text(`Subtotal materiais: ${brl(subtotalMateriaisVenda)}`, marginX, y); y +=
                 </div>
               )}
 
-              <button type="button" onClick={async()=>{ try{ ensureFirebase(); if(!authEmail) return alert('Informe seu e‑mail.'); await sendPasswordResetEmail(getAuth(), authEmail); pushToast('E‑mail de redefinição enviado.'); }catch(e){ alert(e?.message || 'Falha ao enviar redefinição'); } }} className="mb-4 mt-2 text-left text-xs text-neutral-600 underline">Esqueci minha senha</button>
+              <button type="button" onClick={async()=>{ try{ ensureFirebase(); if(!authEmail) return alert('Informe seu e-mail.'); await sendPasswordResetEmail(getAuth(), authEmail); pushToast('E-mail de redefinição enviado.'); }catch(e){ alert(e?.message || 'Falha ao enviar redefinição'); } }} className="mb-4 mt-2 text-left text-xs text-neutral-600 underline">Esqueci minha senha</button>
               <div className="flex gap-2">
                 {authMode === "signin" ? (
-                  <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; const msg = authMsg(code); if(code==='auth/user-not-found'){ if(window.confirm(msg + ' Deseja criar uma conta agora?')) setAuthMode('signup'); } else if(code==='auth/invalid-credential' || code==='auth/wrong-password'){ if(window.confirm(msg + ' Deseja enviar e‑mail de redefinição?')) await offerReset(authEmail); } else { alert(msg); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
+                  <button onClick={async()=>{ try{ ensureFirebase(); await signInWithEmailAndPassword(getAuth(), authEmail, authPass); setAuthOpen(false);}catch(e){ const code = e?.code || ''; const msg = authMsg(code); if(code==='auth/user-not-found'){ if(window.confirm(msg + ' Deseja criar uma conta agora?')) setAuthMode('signup'); } else if(code==='auth/invalid-credential' || code==='auth/wrong-password'){ if(window.confirm(msg + ' Deseja enviar e-mail de redefinição?')) await offerReset(authEmail); } else { alert(msg); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Entrar</button>
                 ) : (
                   <button onClick={async()=>{ try{ ensureFirebase(); if (authPass !== signupPass2) { alert('As senhas não conferem.'); return; } const cred = await createUserWithEmailAndPassword(getAuth(), authEmail, authPass); if (signupLogoDataUrl) { try { await setDoc(doc(fbDb, 'users', cred.user.uid, 'meta', 'profile'), { logoDataUrl: signupLogoDataUrl, updatedAt: serverTimestamp() }); setState((s)=> ({...s, logoDataUrl: signupLogoDataUrl})); } catch {} } setAuthOpen(false); pushToast('Conta criada.'); }catch(e){ const code = e?.code || ''; if(code==='auth/email-already-in-use'){ const goSignIn = window.confirm('Este e-mail já está cadastrado. Deseja entrar com ele?'); if(goSignIn){ setAuthMode('signin'); } else { const send = window.confirm('Deseja enviar e-mail de redefinição de senha para este endereço?'); if(send) await offerReset(authEmail); } } else { alert(authMsg(code)); } } }} className="flex-1 rounded-2xl bg-black px-4 py-2 text-white">Criar conta</button>
                 )}
