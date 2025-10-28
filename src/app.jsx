@@ -532,7 +532,7 @@ y = (doc.lastAutoTable?.finalY || y) + 10;
 doc.setFont("helvetica", "italic");
 doc.setFontSize(8);
 doc.text(
-  "Os valores de materiais acima incluem: % de perda, % de lucro e % de taxa configuradas.",
+  "",
   marginX,
   y
 );
@@ -541,9 +541,25 @@ doc.setFont("helvetica", "normal");
 doc.setFontSize(10);
 
 
-    // Totais (sem expor infos internas)
-    doc.setFont("helvetica", "normal");
-    doc.text(`Subtotal materiais: ${brl(computed.materiaisAjustados)}`, marginX, y); y += 14;
+// Totais (sem expor infos internas) — Subtotal de materiais COM perda + lucro + taxa
+
+doc.setFont("helvetica", "normal");
+
+// Recalcula o mesmo fator usado nos itens do PDF
+const perdaFactor = 1 + (computed.perda || 0);
+const lucroPct = toNumber(state.lucroPct) / 100;
+const taxaPct  = toNumber(state.taxaPct) / 100;
+const denom    = 1 - taxaPct;
+const vendaFactor = denom > 0 ? (1 + lucroPct) / denom : (1 + lucroPct);
+const fatorFinal = perdaFactor * vendaFactor;
+
+// Soma dos itens já “de venda”
+const subtotalMateriaisVenda = computed.materiais
+  .filter((m) => (m.descricao || "").trim() !== "")
+  .reduce((acc, m) => acc + (m.qtdNum * (m.unitNum * fatorFinal)), 0);
+
+doc.text(`Subtotal materiais: ${brl(subtotalMateriaisVenda)}`, marginX, y); y += 14;
+
     doc.setFont("helvetica", "bold"); doc.setFontSize(12);
     doc.text(`Preço unitário: ${Number.isFinite(computed.precoFinal) ? brl(computed.precoFinal) : "—"}`, marginX, y); y += 18;
     doc.text(`Total para ${computed.quantidade} un.: ${Number.isFinite(computed.totalGeral) ? brl(computed.totalGeral) : "—"}`, marginX, y); y += 22;
