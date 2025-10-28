@@ -54,7 +54,7 @@ export default function CalculadoraPrecificacao() {
   const toNumber = (value) => {
     if (typeof value === "number") return value;
     if (value === null || value === undefined) return 0;
-    const s = String(value).trim().replaceAll(" ", "").replaceAll(" ", "").replaceAll(",", ".");
+    const s = String(value).trim().replaceAll(" ", "").replaceAll(" ", "").replaceAll(",", ".");
     const n = parseFloat(s);
     return Number.isNaN(n) ? 0 : n;
   };
@@ -497,27 +497,49 @@ export default function CalculadoraPrecificacao() {
     if (state.clienteContato) { doc.text(`Contato: ${state.clienteContato}`, marginX, y); y += 14; }
     doc.text(`Quantidade: ${computed.quantidade}`, marginX, y); y += 18;
 
-    // Itens – embute a perda nos preços unitários
-    const perdaFactor = 1 + (computed.perda || 0);
-    const linhas = computed.materiais
-      .filter((m) => (m.descricao || "").trim() !== "")
-      .map((m) => {
-        const unitAdj = m.unitNum * perdaFactor;
-        const totalAdj = m.qtdNum * unitAdj;
-        return [m.descricao, String(m.qtdNum), brl(unitAdj), brl(totalAdj)];
-      });
+// Itens – valores com PERDA + LUCRO + TAXA (apenas no PDF)
+const perdaFactor = 1 + (computed.perda || 0);
+const lucroPct = toNumber(state.lucroPct) / 100;
+const taxaPct  = toNumber(state.taxaPct) / 100;
+const denom    = 1 - taxaPct;
+// se taxa >= 100%, evitamos divisão por zero: aplica só o lucro
+const vendaFactor = denom > 0 ? (1 + lucroPct) / denom : (1 + lucroPct);
 
-    autoTable(doc, {
-      startY: y,
-      head: [["Descrição", "Qtd usada", "Valor unit (R$)", "Valor usado (R$)"]],
-      body: linhas.length ? linhas : [["—", "—", "—", "—"]],
-      theme: "grid",
-      styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
-      headStyles: { fillColor: [0,0,0], textColor: [255,255,255] },
-      margin: { left: marginX, right: marginX }
-    });
+// fator final para o valor unitário exibido no PDF
+const fatorFinal = perdaFactor * vendaFactor;
 
-    y = (doc.lastAutoTable?.finalY || y) + 10;
+const linhas = computed.materiais
+  .filter((m) => (m.descricao || "").trim() !== "")
+  .map((m) => {
+    const unitAdj = m.unitNum * fatorFinal;
+    const totalAdj = m.qtdNum * unitAdj;
+    return [m.descricao, String(m.qtdNum), brl(unitAdj), brl(totalAdj)];
+  });
+
+autoTable(doc, {
+  startY: y,
+  head: [["Descrição", "Qtd usada", "Valor unit (R$)", "Valor usado (R$)"]],
+  body: linhas.length ? linhas : [["—", "—", "—", "—"]],
+  theme: "grid",
+  styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+  headStyles: { fillColor: [0,0,0], textColor: [255,255,255] },
+  margin: { left: marginX, right: marginX }
+});
+
+y = (doc.lastAutoTable?.finalY || y) + 10;
+
+// (opcional) Nota no PDF informando o que está embutido nos valores
+doc.setFont("helvetica", "italic");
+doc.setFontSize(8);
+doc.text(
+  "Os valores de materiais acima incluem: % de perda, % de lucro e % de taxa configuradas.",
+  marginX,
+  y
+);
+y += 10;
+doc.setFont("helvetica", "normal");
+doc.setFontSize(10);
+
 
     // Totais (sem expor infos internas)
     doc.setFont("helvetica", "normal");
